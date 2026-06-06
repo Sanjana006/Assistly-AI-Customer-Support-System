@@ -1,0 +1,52 @@
+# Python virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Environment variables / secrets
+.env
+.env.*
+!.env.example
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Distribution / build
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# Databases
+*.db
+*.sqlite3
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# ChromaDB / vector store data
+knowledge_base/chroma_db/
+
+# Test cache
+.pytest_cache/
+.coverage
+htmlcov/
