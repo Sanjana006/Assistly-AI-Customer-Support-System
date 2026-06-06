@@ -1,0 +1,31 @@
+# Core AI/Agent framework
+langgraph==0.2.28
+langchain==0.3.7
+langchain-community==0.3.7
+
+# LLM providers
+openai==1.54.3
+
+# Vector database for knowledge base
+chromadb==0.5.18
+
+# Data handling
+datasets==3.1.0
+pandas==2.2.3
+sqlalchemy>=1.4,<2.0.36
+
+# API layer
+fastapi==0.115.4
+uvicorn==0.32.0
+pydantic==2.9.2
+
+# UI
+streamlit==1.40.0
+
+# Evaluation
+ragas==0.2.6
+
+# Utilities
+python-dotenv==1.0.1
+rich==13.9.4
+loguru==0.7.2

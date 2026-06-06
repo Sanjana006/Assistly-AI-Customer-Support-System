@@ -1,0 +1,10 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/multi-agent-support/venv/bin/python",
+  "python.pythonPath": "${workspaceFolder}/multi-agent-support/venv/bin/python",
+  "python.analysis.pythonPath": "${workspaceFolder}/multi-agent-support/venv/bin/python",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/multi-agent-support/venv/lib/python3.12/site-packages"
+  ],
+  "python.terminal.activateEnvironment": true,
+  "pyrefly.pythonInterpreter": "${workspaceFolder}/multi-agent-support/venv/bin/python"
+}
