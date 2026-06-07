@@ -167,7 +167,7 @@ def main(args):
         bf16=True,   # L4 / Ada Lovelace GPUs have native BF16 — faster & more stable than FP16
         max_grad_norm=0.3,
         num_train_epochs=args.epochs,
-        evaluation_strategy="steps",
+        eval_strategy="steps",
         eval_steps=50,
         save_strategy="steps",
         save_steps=100,
