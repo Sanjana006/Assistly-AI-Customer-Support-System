@@ -7,7 +7,7 @@ from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.utils.quantization_config import BitsAndBytesConfig
 from transformers.training_args import TrainingArguments
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from trl import SFTTrainer
+from trl.trainer.sft_trainer import SFTTrainer
 import argparse
 
 def format_chatml(row):
