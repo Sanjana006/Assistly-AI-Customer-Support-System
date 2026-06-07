@@ -50,3 +50,8 @@ knowledge_base/chroma_db/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Fine-tuning checkpoint directories and optimizer states
+**/checkpoint-*/
+
+multi-agent-support/fine_tuned_classifier/checkpoint-*/
