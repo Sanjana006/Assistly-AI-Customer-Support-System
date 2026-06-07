@@ -6,18 +6,20 @@ base_dir = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(dotenv_path=os.path.join(base_dir, ".env"))           # multi-agent-support/.env
 load_dotenv(dotenv_path=os.path.join(base_dir, "..", ".env"))     # repo root .env (fallback)
 
-def _get_secret(key: str, default: str | None = None) -> str | None:
-    """Read from Streamlit secrets first (cloud), then env vars (local)."""
-    try:
-        import streamlit as st
-        if key in st.secrets:
-            return str(st.secrets[key])
-    except Exception:
-        pass
-    return os.getenv(key, default)
+# ── Streamlit Cloud: inject secrets into os.environ ──────────────────────────
+# st.secrets is available when running on Streamlit Cloud. Injecting here
+# ensures all os.getenv() calls below (and in third-party libraries like
+# langchain-groq) pick up the right values without needing per-call lookups.
+try:
+    import streamlit as st
+    for _key in ["GROQ_API_KEY", "DATABASE_URL", "CHROMA_PATH", "USE_PROD"]:
+        if _key in st.secrets and not os.getenv(_key):
+            os.environ[_key] = str(st.secrets[_key])
+except Exception:
+    pass  # Running locally or st.secrets not available — .env values are used
 
 class Config:
-    GROQ_API_KEY = _get_secret("GROQ_API_KEY")
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
     # Use the same fast model for all agents — 70b was causing 57s delays
     DEV_MODEL  = "llama-3.1-8b-instant"
