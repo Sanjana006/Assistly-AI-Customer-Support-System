@@ -21,37 +21,104 @@ class ClassificationResult(BaseModel):
 
 def classify_message(state: dict) -> dict:
     existing_order_id = state.get("classification", {}).get("order_id")
-    
-    # Check if local PEFT model is enabled and weights are available
-    local_loaded = False
-    result_dict = None
-    
+    result_dict = None  # Will be set by local PEFT model if available, else Cloud API
+
+    # ── Local PEFT Classifier (only if enabled AND weights exist) ───────────
     if Config.USE_LOCAL_CLASSIFIER:
         from loguru import logger
-        if os.path.exists(Config.LOCAL_MODEL_PATH) and len(os.listdir(Config.LOCAL_MODEL_PATH)) > 0:
+        adapter_path = Config.LOCAL_MODEL_PATH
+        if os.path.exists(adapter_path) and len(os.listdir(adapter_path)) > 0:
             try:
-                logger.info(f"Local Classifier: Loading PEFT model from {Config.LOCAL_MODEL_PATH}...")
-                import torch
-                from transformers import AutoTokenizer, AutoModelForCausalLM
+                import json, re, torch
+                from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
                 from peft import PeftModel
-                import json
-                
-                # Logic to load tokenizer and model
-                # tokenizer = AutoTokenizer.from_pretrained(Config.LOCAL_MODEL_PATH)
-                # base_model = AutoModelForCausalLM.from_pretrained("meta-llama/Meta-Llama-3-8B-Instruct", torch_dtype=torch.float16, device_map="auto")
-                # model = PeftModel.from_pretrained(base_model, Config.LOCAL_MODEL_PATH)
-                
-                # Mock a successful local prediction for the UI demonstration to show local model is active:
-                logger.info("Local Classifier: Running inference using Llama-3-8B-Instruct + LoRA Adapters...")
-                
-                # Fallback mock for demonstration if torch/transformers are not fully configured
-                # in this specific environment, otherwise runs full model logic.
-                # In production, we run the model.generate() and parse the JSON output.
-                pass
+
+                # ── Cache model across requests (load once, reuse) ──────────
+                # We stash the loaded model on this module so Streamlit reruns
+                # don't reload 1.5B weights on every message.
+                _cache = sys.modules[__name__].__dict__
+                if "_local_model" not in _cache or _cache.get("_local_model_path") != adapter_path:
+                    logger.info(f"Local Classifier: Loading Qwen2.5-1.5B base + LoRA adapter from {adapter_path}...")
+
+                    BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
+
+                    tokenizer = AutoTokenizer.from_pretrained(adapter_path)  # type: ignore[misc]
+                    tokenizer.pad_token = tokenizer.eos_token  # type: ignore[assignment]
+
+                    bnb_config = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_quant_type="nf4",
+                        bnb_4bit_use_double_quant=True,
+                        bnb_4bit_compute_dtype=torch.float16,
+                    )
+                    base_model = AutoModelForCausalLM.from_pretrained(  # type: ignore[misc]
+                        BASE_MODEL,
+                        quantization_config=bnb_config,
+                        device_map="auto",
+                        torch_dtype=torch.float16,
+                    )
+                    if base_model is None:
+                        raise RuntimeError(f"AutoModelForCausalLM.from_pretrained returned None for {BASE_MODEL}")
+                    model = PeftModel.from_pretrained(base_model, adapter_path)
+                    model.eval()
+
+                    _cache["_local_model"]      = model
+                    _cache["_local_tokenizer"]  = tokenizer
+                    _cache["_local_model_path"] = adapter_path
+                    logger.info("Local Classifier: Model loaded and cached.")
+
+                model     = _cache["_local_model"]
+                tokenizer = _cache["_local_tokenizer"]
+
+                # ── Build the same prompt used during training ───────────────
+                system_prompt = (
+                    "You are a customer support classifier for an e-commerce platform. "
+                    "Analyze the customer message and extract intent, sentiment, frustration score, "
+                    "urgency, any order IDs or emails, and a brief summary. "
+                    "Always respond with valid JSON matching the exact schema."
+                )
+                chat_messages = [
+                    {"role": "system",    "content": system_prompt},
+                    {"role": "user",      "content": f"Customer message: {state['user_message']}"},
+                ]
+                prompt_text = tokenizer.apply_chat_template(
+                    chat_messages, tokenize=False, add_generation_prompt=True
+                )
+                inputs = tokenizer(prompt_text, return_tensors="pt").to(model.device)
+
+                logger.info("Local Classifier: Running inference with LoRA adapter...")
+                with torch.no_grad():
+                    output_ids = model.generate(
+                        **inputs,
+                        max_new_tokens=200,
+                        do_sample=False,
+                        pad_token_id=tokenizer.eos_token_id,
+                    )
+                generated = tokenizer.decode(
+                    output_ids[0][inputs["input_ids"].shape[-1]:],
+                    skip_special_tokens=True
+                ).strip()
+
+                # ── Parse JSON out of the generated text ─────────────────────
+                json_match = re.search(r"\{.*\}", generated, re.DOTALL)
+                if json_match:
+                    parsed = json.loads(json_match.group())
+                    parsed["frustration_score"] = max(0.0, min(1.0, float(parsed.get("frustration_score", 0.2))))
+                    result = ClassificationResult(**parsed)
+                    result_dict = result.model_dump()
+                    logger.info(f"Local Classifier: Intent={result_dict['intent']}, Sentiment={result_dict['sentiment']}")
+                else:
+                    logger.warning(f"Local Classifier: Could not parse JSON from output: {generated!r}. Falling back.")
+
             except Exception as e:
-                logger.warning(f"Local Classifier: Failed to run local model ({e}). Falling back to Cloud API.")
+                from loguru import logger as _log
+                _log.warning(f"Local Classifier: Failed ({e}). Falling back to Cloud API.")
         else:
-            logger.warning(f"Local Classifier: Weights not found at {Config.LOCAL_MODEL_PATH}. Please run multi-agent-support/scripts/finetune.py first. Falling back to Cloud API.")
+            from loguru import logger
+            logger.warning(
+                f"Local Classifier: No weights at {adapter_path}. "
+                "Run scripts/finetune.py first. Falling back to Cloud API."
+            )
 
     # Cloud API Classifier — uses JSON mode to avoid Groq tool_use_failed bug
     # llama-3.1-8b-instant wraps structured output in <function=...> tags when

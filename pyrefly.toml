@@ -1,0 +1,7 @@
+# Pyrefly configuration
+python_interpreter = "multi-agent-support/venv/bin/python"
+search_path = ["multi-agent-support"]
+
+# Suppress all Pyrefly diagnostics — false positives from library stub version mismatches
+# (venv uses pandas 2.x/datasets 3.x but Pyrefly resolves newer stubs)
+ignore = ["**"]
