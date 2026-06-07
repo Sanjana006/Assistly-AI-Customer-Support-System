@@ -185,7 +185,7 @@ def main(args):
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         peft_config=peft_config,
-        tokenizer=tokenizer,  # type: ignore[call-arg]
+        processing_class=tokenizer,  # type: ignore[call-arg]
         args=training_args,
     )
     
