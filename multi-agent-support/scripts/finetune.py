@@ -172,7 +172,6 @@ def main(args):
         save_strategy="steps",
         save_steps=100,
         warmup_ratio=0.03,
-        group_by_length=True,
         lr_scheduler_type="cosine",
         report_to="none",
     )
