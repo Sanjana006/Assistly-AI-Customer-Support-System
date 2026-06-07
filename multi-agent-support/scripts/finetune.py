@@ -6,7 +6,7 @@ from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.utils.quantization_config import BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from transformers.training_args import TrainingArguments
+from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
 import argparse
 
@@ -156,7 +156,7 @@ def main(args):
     model.print_trainable_parameters()
     
     # Configure SFT Training Parameters
-    training_args = TrainingArguments(
+    training_args = SFTConfig(
         output_dir=args.output_dir,
         per_device_train_batch_size=args.batch_size,
         gradient_accumulation_steps=args.gradient_accumulation,
@@ -174,6 +174,9 @@ def main(args):
         warmup_ratio=0.03,
         lr_scheduler_type="cosine",
         report_to="none",
+        dataset_text_field="text",
+        max_length=512,
+        packing=False,
     )
     
     # Initialize SFTTrainer
@@ -182,11 +185,8 @@ def main(args):
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         peft_config=peft_config,
-        dataset_text_field="text",  # type: ignore[call-arg]
-        max_seq_length=512,  # type: ignore[call-arg]
         tokenizer=tokenizer,  # type: ignore[call-arg]
         args=training_args,
-        packing=False,  # type: ignore[call-arg]
     )
     
     print("🔥 Starting QLoRA fine-tuning training loop...")
