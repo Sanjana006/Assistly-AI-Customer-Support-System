@@ -175,7 +175,7 @@ def main(args):
         lr_scheduler_type="cosine",
         report_to="none",
         dataset_text_field="text",
-        max_seq_length=512,
+        max_seq_length=512,  # type: ignore[call-arg]
         packing=False,
     )
     
@@ -185,7 +185,7 @@ def main(args):
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         peft_config=peft_config,
-        tokenizer=tokenizer,
+        tokenizer=tokenizer,  # type: ignore[call-arg]
         args=training_args,
     )
     
