@@ -153,9 +153,6 @@ def main(args):
         task_type="CAUSAL_LM",
     )
     
-    model = get_peft_model(model, peft_config)
-    model.print_trainable_parameters()
-    
     # Configure SFT Training Parameters
     training_args = SFTConfig(
         output_dir=args.output_dir,
@@ -182,7 +179,7 @@ def main(args):
     
     # Initialize SFTTrainer
     trainer = SFTTrainer(
-        model=model,  # type: ignore[arg-type]
+        model=model,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         peft_config=peft_config,
