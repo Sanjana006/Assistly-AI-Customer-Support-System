@@ -128,7 +128,7 @@ def main(args):
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
         bnb_4bit_use_double_quant=True,
-        bnb_4bit_compute_dtype=torch.float16,
+        bnb_4bit_compute_dtype=torch.bfloat16,  # BF16 for L4/Ada Lovelace GPUs
     )
     
     print(f"Loading base model: {args.base_model}...")
@@ -163,7 +163,8 @@ def main(args):
         optim="paged_adamw_32bit",
         logging_steps=10,
         learning_rate=args.learning_rate,
-        fp16=True,
+        fp16=False,
+        bf16=True,   # L4 / Ada Lovelace GPUs have native BF16 — faster & more stable than FP16
         max_grad_norm=0.3,
         num_train_epochs=args.epochs,
         evaluation_strategy="steps",
