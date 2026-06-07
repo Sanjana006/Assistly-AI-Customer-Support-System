@@ -44,6 +44,12 @@ def classify_message(state: dict) -> dict:
 
                     tokenizer = AutoTokenizer.from_pretrained(adapter_path)  # type: ignore[misc]
                     tokenizer.pad_token = tokenizer.eos_token  # type: ignore[assignment]
+                    
+                    # Load chat template from jinja file if present and not loaded automatically
+                    chat_template_path = os.path.join(adapter_path, "chat_template.jinja")
+                    if os.path.exists(chat_template_path) and not getattr(tokenizer, "chat_template", None):
+                        with open(chat_template_path, "r", encoding="utf-8") as f:
+                            tokenizer.chat_template = f.read()
 
                     bnb_config = BitsAndBytesConfig(
                         load_in_4bit=True,
@@ -154,28 +160,37 @@ Rules:
 - order_id must match pattern ORD followed by digits (e.g. ORD00042) or null
 - Return ONLY the JSON object, no extra text, no markdown, no wrapping tags"""
 
-        response = llm.invoke([
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=f"Customer message: {state['user_message']}")
-        ])
-
-        raw = str(response.content).strip()
-        # Strip any accidental markdown code fences
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        raw = raw.strip()
-
         try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Classifier returned invalid JSON: {e}\nRaw: {raw}") from e
+            response = llm.invoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=f"Customer message: {state['user_message']}")
+            ])
 
-        # Clamp frustration_score to valid range and validate via Pydantic
-        parsed["frustration_score"] = max(0.0, min(1.0, float(parsed.get("frustration_score", 0.0))))
-        result = ClassificationResult(**parsed)
-        result_dict = result.model_dump()
+            raw = str(response.content).strip()
+            # Strip any accidental markdown code fences
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            raw = raw.strip()
+
+            parsed = json.loads(raw)
+            # Clamp frustration_score to valid range and validate via Pydantic
+            parsed["frustration_score"] = max(0.0, min(1.0, float(parsed.get("frustration_score", 0.0))))
+            result = ClassificationResult(**parsed)
+            result_dict = result.model_dump()
+        except Exception as e:
+            from loguru import logger
+            logger.error(f"Classifier Cloud API failed: {e}. Using fallback classification.")
+            result_dict = {
+                "intent": "general_inquiry",
+                "sentiment": "neutral",
+                "frustration_score": 0.0,
+                "urgency": "low",
+                "order_id": existing_order_id,
+                "customer_email": None,
+                "summary": "Fallback classification due to API error"
+            }
 
     # Preserve pinned active order ID if the model did not detect a new one
     if not result_dict.get("order_id") and existing_order_id:

@@ -3,10 +3,17 @@ import pandas as pd
 import random
 from datetime import datetime, timedelta
 import os
+import sys
+
+# Ensure config is importable relative to this file
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import Config
 
 def create_database():
-    os.makedirs("data", exist_ok=True)
-    engine = create_engine("sqlite:///./data/support.db")
+    random.seed(42)
+    db_path = Config.DATABASE_URL.replace("sqlite:///", "")
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    engine = create_engine(Config.DATABASE_URL)
     
     with engine.connect() as conn:
         # Create tables
@@ -32,6 +39,7 @@ def create_database():
                 expected_delivery TEXT,
                 delivered_at TEXT,
                 tracking_number TEXT,
+                return_policy TEXT,
                 FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
             )
         """))
@@ -44,6 +52,17 @@ def create_database():
                 reason TEXT,
                 status TEXT,
                 created_at TEXT
+            )
+        """))
+
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS replacements (
+                replacement_id TEXT PRIMARY KEY,
+                order_id TEXT,
+                status TEXT,
+                reason TEXT,
+                created_at TEXT,
+                FOREIGN KEY (order_id) REFERENCES orders(order_id)
             )
         """))
         
@@ -88,16 +107,26 @@ def create_database():
             delivered = (expected + timedelta(days=random.randint(0,3))).isoformat() \
                         if status == "delivered" else None
             
+            product = random.choice(products)
+            # Assign return policies based on product category
+            if product in ["Kindle Paperwhite", "Noise Smartwatch", "Samsung Galaxy S24", "iPhone 15 Pro", "Xiaomi Laptop"]:
+                policy = "replacement_only"
+            elif product in ["boAt Earbuds", "Sony Headphones"]:
+                policy = "non_returnable"
+            else:
+                policy = "eligible"
+
             orders.append({
                 "order_id": f"ORD{i+1:05d}",
                 "customer_id": cust["customer_id"],
-                "product_name": random.choice(products),
+                "product_name": product,
                 "amount": round(random.uniform(299, 89999), 2),
                 "status": status,
                 "created_at": created.isoformat(),
                 "expected_delivery": expected.isoformat(),
                 "delivered_at": delivered,
-                "tracking_number": f"IND{random.randint(100000000,999999999)}"
+                "tracking_number": f"IND{random.randint(100000000,999999999)}",
+                "return_policy": policy
             })
         
         # Use conn (Connection) not engine — fixes the Pyrefly type error

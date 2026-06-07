@@ -5,9 +5,8 @@ from datasets import Dataset
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.utils.quantization_config import BitsAndBytesConfig
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from trl.trainer.sft_config import SFTConfig
-from trl.trainer.sft_trainer import SFTTrainer
+from peft import LoraConfig, prepare_model_for_kbit_training
+from trl import SFTConfig, SFTTrainer
 import argparse
 
 def format_chatml(row):

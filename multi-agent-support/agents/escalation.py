@@ -1,7 +1,8 @@
 from config import Config
 
 def check_escalation(state: dict) -> dict:
-    reasons = []
+    resolver_escalated = state.get("needs_escalation", False)
+    resolver_reasons = state.get("escalation_reasons", [])
 
     # ✅ Rule 0: If waiting for confirmation → NEVER escalate
     if state.get("awaiting_confirmation"):
@@ -15,8 +16,10 @@ def check_escalation(state: dict) -> dict:
         state["escalation_reasons"] = ["Customer requested human agent"]
         return state
 
-    # ✅ Rule 2: NEVER auto-escalate refund requests
-    if state.get("intent") == "refund_request":
+    reasons = list(resolver_reasons) if resolver_escalated else []
+
+    # ✅ Rule 2: NEVER auto-escalate normal refund requests
+    if state.get("intent") == "refund_request" and not resolver_escalated:
         state["needs_escalation"] = False
         state["escalation_reasons"] = []
         return state
@@ -37,14 +40,15 @@ def check_escalation(state: dict) -> dict:
     ):
         reasons.append("High urgency + negative sentiment")
 
-    state["needs_escalation"] = len(reasons) > 0
+    state["needs_escalation"] = len(reasons) > 0 or resolver_escalated
     state["escalation_reasons"] = reasons
 
     if state["needs_escalation"]:
-        state["final_response"] = (
-            "I'm connecting you with a senior support specialist who can better assist you. "
-            "Expected wait: 5-10 minutes.\n\n"
-            + state.get("final_response", "")
-        )
+        conn_msg = "I'm connecting you with a senior support specialist who can better assist you. Expected wait: 5-10 minutes."
+        if conn_msg not in state.get("final_response", ""):
+            state["final_response"] = (
+                f"{conn_msg}\n\n"
+                + state.get("final_response", "")
+            )
 
     return state

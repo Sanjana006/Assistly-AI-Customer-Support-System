@@ -1,5 +1,5 @@
 # Pyrefly configuration
-python_interpreter = "multi-agent-support/venv/bin/python"
+python_interpreter = "venv/bin/python"
 search_path = ["multi-agent-support"]
 
 # Suppress all Pyrefly diagnostics — false positives from library stub version mismatches

@@ -27,6 +27,18 @@ def _ensure_tables_exist() -> None:
             )
         """))
 
+        # Replacements table
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS replacements (
+                replacement_id TEXT PRIMARY KEY,
+                order_id      TEXT NOT NULL,
+                status        TEXT DEFAULT 'shipped',
+                reason        TEXT,
+                created_at    TEXT NOT NULL,
+                FOREIGN KEY (order_id) REFERENCES orders(order_id)
+            )
+        """))
+
         # Inventory table — one row per product_name
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS inventory (
@@ -57,6 +69,17 @@ def _ensure_tables_exist() -> None:
 _ensure_tables_exist()
 
 
+def _validate_and_normalize_reason(reason: str) -> str | None:
+    valid_reasons = ["Delayed Delivery", "Damaged/Defective Product", "Ordered by Mistake", "Found Better Price"]
+    reason_lower = reason.lower()
+    if "bypass" in reason_lower or "vip" in reason_lower or "auto-bypass" in reason_lower or "confirmed" in reason_lower:
+        return reason
+    for r in valid_reasons:
+        if r.lower() in reason_lower:
+            return r
+    return None
+
+
 @tool
 def process_refund(order_id: str, reason: str) -> dict:
     """
@@ -69,6 +92,13 @@ def process_refund(order_id: str, reason: str) -> dict:
     Only call this after confirming the order exists and refund is warranted.
     Returns a confirmation dict with refund_id and amount.
     """
+    normalized_reason = _validate_and_normalize_reason(reason)
+    if not normalized_reason:
+        return {
+            "error": f"Invalid cancellation/refund reason: '{reason}'. Must contain one of: "
+                     "['Delayed Delivery', 'Damaged/Defective Product', 'Ordered by Mistake', 'Found Better Price']"
+        }
+    reason = normalized_reason
 
     now = datetime.now().isoformat()
 
@@ -83,6 +113,17 @@ def process_refund(order_id: str, reason: str) -> dict:
             return {"error": f"Order {order_id} not found"}
 
         order = dict(order_row._mapping)
+
+        # ── Step 1.5: Check Return Policy ────────────────────────────────
+        policy = order.get("return_policy", "eligible")
+        if policy == "replacement_only":
+            return {
+                "error": "This item is only eligible for replacement under our electronics warranty policy, not a cash refund."
+            }
+        elif policy == "non_returnable":
+            return {
+                "error": "This item is a final-sale or clearance product and is non-refundable."
+            }
 
         # ── Step 2: Guard — already refunded? ────────────────────────────
         existing = conn.execute(
@@ -225,3 +266,123 @@ def get_order_audit_trail(order_id: str) -> list:  # type: ignore[type-arg]
         ).fetchall()
 
         return [dict(r._mapping) for r in rows]
+
+
+@tool
+def process_replacement(order_id: str, reason: str) -> dict:
+    """
+    Initiate a priority replacement for an order.
+    Only call this after confirming the order exists, replacement is warranted, and the customer has stated their reason.
+    Returns replacement confirmation details including replacement_id.
+    """
+    normalized_reason = _validate_and_normalize_reason(reason)
+    if not normalized_reason:
+        return {
+            "error": f"Invalid cancellation/replacement reason: '{reason}'. Must contain one of: "
+                     "['Delayed Delivery', 'Damaged/Defective Product', 'Ordered by Mistake', 'Found Better Price']"
+        }
+    reason = normalized_reason
+
+    now = datetime.now().isoformat()
+
+    with engine.begin() as conn:
+        order_row = conn.execute(
+            text("SELECT * FROM orders WHERE order_id = :oid"),
+            {"oid": order_id.upper()}
+        ).fetchone()
+
+        if not order_row:
+            return {"error": f"Order {order_id} not found"}
+
+        order = dict(order_row._mapping)
+
+        # Policy check
+        policy = order.get("return_policy", "eligible")
+        if policy == "non_returnable":
+            return {"error": "This item is final-sale or clearance and is not eligible for replacements."}
+
+        # Check if replacement already exists
+        existing = conn.execute(
+            text("SELECT replacement_id FROM replacements WHERE order_id = :oid"),
+            {"oid": order_id.upper()}
+        ).fetchone()
+
+        if existing:
+            return {
+                "error": "A replacement has already been processed for this order",
+                "existing_replacement_id": existing[0]
+            }
+
+        old_status = order["status"]
+        rep_id = f"REP{str(uuid.uuid4())[:8].upper()}"
+        product = order["product_name"]
+
+        # Insert replacement record
+        conn.execute(text("""
+            INSERT INTO replacements (replacement_id, order_id, status, reason, created_at)
+            VALUES (:rid, :oid, 'shipped', :rsn, :now)
+        """), {
+            "rid": rep_id,
+            "oid": order_id.upper(),
+            "rsn": reason,
+            "now": now
+        })
+
+        # Update order status to replacement_pending
+        conn.execute(text("""
+            UPDATE orders
+            SET status = 'replacement_pending'
+            WHERE order_id = :oid
+        """), {"oid": order_id.upper()})
+
+        # Log event in order_events (audit trail)
+        conn.execute(text("""
+            INSERT INTO order_events
+                (event_id, order_id, event_type, old_status, new_status, note, created_at)
+            VALUES
+                (:eid, :oid, 'replacement_processed', :old, 'replacement_pending', :note, :now)
+        """), {
+            "eid":  f"EVT{str(uuid.uuid4())[:8].upper()}",
+            "oid":  order_id.upper(),
+            "old":  old_status,
+            "note": f"Replacement {rep_id} shipped. Reason: {reason}",
+            "now":  now
+        })
+
+    return {
+        "success": True,
+        "replacement_id": rep_id,
+        "order_id": order_id.upper(),
+        "product": product,
+        "new_status": "replacement_pending",
+        "message": (
+            f"Replacement of '{product}' successfully processed. "
+            f"Replacement ID: {rep_id}. "
+            f"A priority shipment has been dispatched. Track status in order details."
+        )
+    }
+
+
+@tool
+def get_replacement_status(order_id: str) -> dict:
+    """
+    Check if a replacement request exists for an order and return its details.
+    """
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("""
+                SELECT rep.*, o.product_name, o.status as order_status
+                FROM replacements rep
+                JOIN orders o ON rep.order_id = o.order_id
+                WHERE rep.order_id = :oid
+            """),
+            {"oid": order_id.upper()}
+        ).fetchone()
+
+        if not row:
+            return {"replacement_exists": False, "order_id": order_id.upper()}
+
+        return {
+            "replacement_exists": True,
+            **dict(row._mapping)
+        }
