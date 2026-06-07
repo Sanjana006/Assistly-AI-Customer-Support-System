@@ -138,6 +138,7 @@ def main(args):
         device_map="auto",
         torch_dtype=torch.float16,
     )
+    assert model is not None, "Base model failed to load"
     
     # Prepare model for PEFT training
     model = prepare_model_for_kbit_training(model)  # type: ignore[operator]
@@ -175,13 +176,13 @@ def main(args):
         lr_scheduler_type="cosine",
         report_to="none",
         dataset_text_field="text",
-        max_length=512,
+        max_length=512,  # type: ignore[call-arg]
         packing=False,
     )
     
     # Initialize SFTTrainer
     trainer = SFTTrainer(
-        model=model,
+        model=model,  # type: ignore[arg-type]
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         peft_config=peft_config,
