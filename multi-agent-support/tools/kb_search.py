@@ -1,13 +1,12 @@
 import chromadb
+from chromadb.utils import embedding_functions
 from langchain_core.tools import tool
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import Config
 
-# Import statically to resolve static analysis/linter warning
-from chromadb.utils.embedding_functions.sentence_transformer_embedding_function import SentenceTransformerEmbeddingFunction
-
-EMBED_FN = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+# Use ChromaDB's built-in default embedding function (no torch/sentence-transformers needed)
+EMBED_FN = embedding_functions.DefaultEmbeddingFunction()
 
 _client = chromadb.PersistentClient(path=Config.CHROMA_PATH)
 _collection = _client.get_or_create_collection(
