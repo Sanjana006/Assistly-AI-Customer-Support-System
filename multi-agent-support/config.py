@@ -32,11 +32,20 @@ class Config:
         return cls.PROD_MODEL if cls.USE_PROD_MODEL else cls.DEV_MODEL
 
     _db_path = os.path.join(base_dir, "data", "support.db")
-    # Ensure database directory exists to avoid SQLite operational errors
-    os.makedirs(os.path.dirname(_db_path), exist_ok=True)
-    
+
+    # On Streamlit Cloud the source directory is read-only; use /tmp instead.
+    # Locally the standard path is used (and the directory is created below).
+    _is_streamlit_cloud = os.path.exists("/mount/src")
+    if _is_streamlit_cloud:
+        _db_path   = "/tmp/support.db"
+        _chroma_default = "/tmp/chroma_db"
+    else:
+        # Ensure database directory exists to avoid SQLite operational errors
+        os.makedirs(os.path.dirname(_db_path), exist_ok=True)
+        _chroma_default = os.path.join(base_dir, "knowledge_base", "chroma_db")
+
     DATABASE_URL    = os.getenv("DATABASE_URL", f"sqlite:///{_db_path}")
-    CHROMA_PATH     = os.getenv("CHROMA_PATH", os.path.join(base_dir, "knowledge_base", "chroma_db"))
+    CHROMA_PATH     = os.getenv("CHROMA_PATH", _chroma_default)
     COLLECTION_NAME = "support_kb"
 
     MAX_RETRIES = 3
