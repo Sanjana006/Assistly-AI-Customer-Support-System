@@ -4,6 +4,24 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agents.orchestrator import process_ticket
 from config import Config
 
+# ── Auto-seed database on first run (Streamlit Cloud has no committed .db) ────
+@st.cache_resource(show_spinner="Setting up database…")
+def _ensure_database():
+    """Create and seed the SQLite database if it doesn't exist."""
+    try:
+        from sqlalchemy import create_engine, inspect
+        engine = create_engine(Config.DATABASE_URL)
+        inspector = inspect(engine)
+        if "customers" not in inspector.get_table_names():
+            from data.seed_database import create_database
+            create_database()
+    except Exception as e:
+        import warnings
+        warnings.warn(f"Database setup failed: {e}")
+
+_ensure_database()
+
+
 # ── Session State Init ────────────────────────────────────────────────────────
 for key, default in [
     ("messages", []),
