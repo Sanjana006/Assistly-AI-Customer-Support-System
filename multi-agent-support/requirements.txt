@@ -29,3 +29,14 @@ ragas==0.2.6
 python-dotenv==1.0.1
 rich==13.9.4
 loguru==0.7.2
+
+# LLM Providers & Groq support
+langchain-groq==0.2.1
+
+# Local fine-tuning & local PEFT model support
+transformers==4.46.2
+peft==0.13.2
+trl==0.12.1
+bitsandbytes>=0.42.0
+accelerate==1.1.1
+torch>=2.2.0

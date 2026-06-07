@@ -1,14 +1,17 @@
 from dotenv import load_dotenv
 import os
 
-load_dotenv()
+# Load .env relative to config.py directory
+base_dir = os.path.dirname(os.path.abspath(__file__))
+dotenv_path = os.path.join(base_dir, ".env")
+load_dotenv(dotenv_path=dotenv_path)
 
 class Config:
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
     # Use the same fast model for all agents — 70b was causing 57s delays
     DEV_MODEL  = "llama-3.1-8b-instant"
-    PROD_MODEL = "llama-3.1-8b-instant"   # keep instant for now, fast enough
+    PROD_MODEL = "llama-3.1-8b-instant"
 
     USE_PROD_MODEL = os.getenv("USE_PROD", "false").lower() == "true"
 
@@ -26,3 +29,6 @@ class Config:
     ESCALATION_FRUSTRATION_THRESHOLD = 0.85
 
     QA_MIN_SCORE = 0.75
+
+    USE_LOCAL_CLASSIFIER = os.getenv("USE_LOCAL_CLASSIFIER", "false").lower() == "true"
+    LOCAL_MODEL_PATH     = os.getenv("LOCAL_MODEL_PATH", "./fine_tuned_classifier")

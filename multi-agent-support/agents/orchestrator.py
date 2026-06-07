@@ -93,6 +93,7 @@ def process_ticket(
     # Pass these in when resuming a confirmation flow
     pending_action: str | None = None,
     pending_order_id: str | None = None,
+    active_order_id: str | None = None,
 ) -> dict:
     import uuid
 
@@ -103,7 +104,7 @@ def process_ticket(
         "conversation_history":  conversation_history or [],
         "ticket_id":             str(uuid.uuid4())[:8].upper(),
 
-        "classification":        {},
+        "classification":        {"order_id": active_order_id} if active_order_id else {},
         "intent":                "",
         "sentiment":             "",
         "frustration_score":     0.0,
