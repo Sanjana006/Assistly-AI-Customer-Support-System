@@ -15,12 +15,19 @@ from config import Config
 # ── Auto-seed database on first run (Streamlit Cloud has no committed .db) ────
 @st.cache_resource(show_spinner="Setting up database…")
 def _ensure_database():
-    """Create and seed the SQLite database if it doesn't exist."""
+    """Create and seed the SQLite database if it doesn't exist or is empty."""
     try:
-        from sqlalchemy import create_engine, inspect
+        from sqlalchemy import create_engine, inspect, text
         engine = create_engine(Config.DATABASE_URL)
         inspector = inspect(engine)
-        if "customers" not in inspector.get_table_names():
+        has_data = False
+        if "customers" in inspector.get_table_names():
+            with engine.connect() as conn:
+                count = conn.execute(text("SELECT COUNT(*) FROM customers")).scalar()
+                if count and count > 0:
+                    has_data = True
+        
+        if not has_data:
             from data.seed_database import create_database
             create_database()
         return {"success": True, "error": None}
