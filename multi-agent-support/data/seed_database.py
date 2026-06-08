@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, text
+import sqlite3
 import pandas as pd
 import random
 from datetime import datetime, timedelta
@@ -13,11 +13,12 @@ def create_database():
     random.seed(42)
     db_path = Config.DATABASE_URL.replace("sqlite:///", "")
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    engine = create_engine(Config.DATABASE_URL)
     
-    with engine.connect() as conn:
+    # Use raw sqlite3 connection directly to bypass SQLAlchemy / pandas version mismatch issues
+    conn = sqlite3.connect(db_path)
+    try:
         # Create tables
-        conn.execute(text("""
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS customers (
                 customer_id TEXT PRIMARY KEY,
                 name TEXT,
@@ -26,9 +27,9 @@ def create_database():
                 tier TEXT,
                 created_at TEXT
             )
-        """))
+        """)
         
-        conn.execute(text("""
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS orders (
                 order_id TEXT PRIMARY KEY,
                 customer_id TEXT,
@@ -42,9 +43,9 @@ def create_database():
                 return_policy TEXT,
                 FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
             )
-        """))
+        """)
         
-        conn.execute(text("""
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS refunds (
                 refund_id TEXT PRIMARY KEY,
                 order_id TEXT,
@@ -53,9 +54,9 @@ def create_database():
                 status TEXT,
                 created_at TEXT
             )
-        """))
+        """)
 
-        conn.execute(text("""
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS replacements (
                 replacement_id TEXT PRIMARY KEY,
                 order_id TEXT,
@@ -64,7 +65,7 @@ def create_database():
                 created_at TEXT,
                 FOREIGN KEY (order_id) REFERENCES orders(order_id)
             )
-        """))
+        """)
         
         # Seed customers
         names = ["Priya Sharma", "Rahul Gupta", "Anita Singh",
@@ -94,8 +95,7 @@ def create_database():
                 "created_at": (datetime.now() - timedelta(days=random.randint(30,730))).isoformat()
             })
         
-        # Use conn (Connection) not engine — correct for pandas 2.x and 3.x
-        pd.DataFrame(customers).to_sql("customers", conn, if_exists="replace", index=False)  # type: ignore[arg-type]
+        pd.DataFrame(customers).to_sql("customers", conn, if_exists="replace", index=False)
         
         # Seed orders
         orders = []
@@ -129,9 +129,10 @@ def create_database():
                 "return_policy": policy
             })
         
-        # Use conn (Connection) not engine — fixes the Pyrefly type error
-        pd.DataFrame(orders).to_sql("orders", conn, if_exists="replace", index=False)  # type: ignore[arg-type]
+        pd.DataFrame(orders).to_sql("orders", conn, if_exists="replace", index=False)
         conn.commit()
+    finally:
+        conn.close()
     
     print("✅ Database created: 100 customers, 500 orders")
     print("   Path: ./data/support.db")
