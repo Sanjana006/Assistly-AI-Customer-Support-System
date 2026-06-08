@@ -95,7 +95,7 @@ def create_database():
             })
         
         # Use conn (Connection) not engine — correct for pandas 2.x and 3.x
-        pd.DataFrame(customers).to_sql("customers", engine, if_exists="replace", index=False)  # type: ignore[arg-type]
+        pd.DataFrame(customers).to_sql("customers", conn, if_exists="replace", index=False)  # type: ignore[arg-type]
         
         # Seed orders
         orders = []
@@ -130,7 +130,7 @@ def create_database():
             })
         
         # Use conn (Connection) not engine — fixes the Pyrefly type error
-        pd.DataFrame(orders).to_sql("orders", engine, if_exists="replace", index=False)  # type: ignore[arg-type]
+        pd.DataFrame(orders).to_sql("orders", conn, if_exists="replace", index=False)  # type: ignore[arg-type]
         conn.commit()
     
     print("✅ Database created: 100 customers, 500 orders")

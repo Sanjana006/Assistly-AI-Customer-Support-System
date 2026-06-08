@@ -46,6 +46,24 @@ class Config:
 
     DATABASE_URL    = os.getenv("DATABASE_URL", f"sqlite:///{_db_path}")
     CHROMA_PATH     = os.getenv("CHROMA_PATH", _chroma_default)
+
+    # Force using writable directory /tmp for SQLite and Chroma on Streamlit Cloud
+    if _is_streamlit_cloud:
+        if DATABASE_URL.startswith("sqlite://"):
+            db_name = os.path.basename(DATABASE_URL) or "support.db"
+            DATABASE_URL = f"sqlite:////tmp/{db_name}"
+        
+        if CHROMA_PATH and not CHROMA_PATH.startswith("/tmp"):
+            src_chroma = CHROMA_PATH
+            chroma_dir = os.path.basename(CHROMA_PATH) or "chroma_db"
+            dest_chroma = f"/tmp/{chroma_dir}"
+            if os.path.exists(src_chroma) and not os.path.exists(dest_chroma):
+                import shutil
+                try:
+                    shutil.copytree(src_chroma, dest_chroma)
+                except Exception as e:
+                    print(f"Warning: Failed to copy chroma_db to {dest_chroma}: {e}")
+            CHROMA_PATH = dest_chroma
     COLLECTION_NAME = "support_kb"
 
     MAX_RETRIES = 3
