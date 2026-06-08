@@ -23,11 +23,12 @@ def _ensure_database():
         if "customers" not in inspector.get_table_names():
             from data.seed_database import create_database
             create_database()
+        return {"success": True, "error": None}
     except Exception as e:
-        import warnings
-        warnings.warn(f"Database setup failed: {e}")
+        import traceback
+        return {"success": False, "error": f"{e}\n{traceback.format_exc()}"}
 
-_ensure_database()
+db_status = _ensure_database()
 
 
 # ── Session State Init ────────────────────────────────────────────────────────
@@ -527,6 +528,9 @@ st.markdown("""
     </div>
 </div>
 """, unsafe_allow_html=True)
+
+if not db_status["success"]:
+    st.error(f"⚠️ Database Setup Error:\n\n{db_status['error']}")
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
 with st.sidebar:
