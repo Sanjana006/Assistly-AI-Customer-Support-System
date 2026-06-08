@@ -13,7 +13,6 @@ from agents.orchestrator import process_ticket
 from config import Config
 
 # ── Auto-seed database on first run (Streamlit Cloud has no committed .db) ────
-@st.cache_resource(show_spinner="Setting up database…")
 def _ensure_database():
     """Create and seed the SQLite database if it doesn't exist or is empty."""
     try:
