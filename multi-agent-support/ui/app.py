@@ -1,5 +1,13 @@
 import streamlit as st
 import sys, os
+
+st.set_page_config(
+    page_title="Assistly — AI Support",
+    page_icon="⚡",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agents.orchestrator import process_ticket
 from config import Config
@@ -40,13 +48,6 @@ for key, default in [
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
-
-st.set_page_config(
-    page_title="Assistly — AI Support",
-    page_icon="⚡",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
 
 # ── Load test scenarios ───────────────────────────────────────────────────────
 def get_test_scenarios():
