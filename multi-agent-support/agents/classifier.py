@@ -6,6 +6,24 @@ import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import Config
 
+def safe_invoke(llm, messages, retries: int = 3, backoff: int = 2):
+    attempt = 0
+    while True:
+        try:
+            return llm.invoke(messages)
+        except Exception as e:
+            is_rate_limit = "rate limit" in str(e).lower() or "429" in str(e) or "ratelimit" in e.__class__.__name__.lower()
+            if is_rate_limit and attempt < retries:
+                attempt += 1
+                from loguru import logger
+                logger.warning(f"Groq rate limit hit in classifier, retrying in {backoff}s... Attempt {attempt}/{retries}")
+                import time
+                time.sleep(backoff)
+                backoff *= 2
+                continue
+            else:
+                raise
+
 class ClassificationResult(BaseModel):
     intent: Literal[
         "order_status", "refund_request", "shipping_inquiry",
@@ -145,7 +163,7 @@ def classify_message(state: dict) -> dict:
   "sentiment": one of ["positive","neutral","negative","angry"],
   "frustration_score": float between 0.0 and 1.0,
   "urgency": one of ["low","medium","high"],
-  "order_id": string like "ORD00001" if mentioned, else null,
+  "order_id": string of the format ORD followed by digits (e.g. ORD00042) if explicitly mentioned in the message, else null,
   "customer_email": string if mentioned, else null,
   "summary": short string summarising the request
 }"""
@@ -161,7 +179,7 @@ Rules:
 - Return ONLY the JSON object, no extra text, no markdown, no wrapping tags"""
 
         try:
-            response = llm.invoke([
+            response = safe_invoke(llm, [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=f"Customer message: {state['user_message']}")
             ])
@@ -191,6 +209,39 @@ Rules:
                 "customer_email": None,
                 "summary": "Fallback classification due to API error"
             }
+
+    # Ensure order ID is valid and not hallucinated or incorrectly defaulted
+    import re
+    user_msg = state["user_message"]
+    
+    # 1. Direct regex match (guaranteed extraction)
+    regex_match = re.search(r"\b(ORD\d+)\b", user_msg, re.IGNORECASE)
+    if regex_match:
+        raw_id = regex_match.group(1).upper()
+        digits_part = re.search(r"\d+", raw_id)
+        if digits_part:
+            result_dict["order_id"] = f"ORD{digits_part.group().zfill(5)}"
+        else:
+            result_dict["order_id"] = raw_id
+    else:
+        # 2. If the LLM extracted an order ID, verify it is actually referred to in the message
+        llm_order_id = result_dict.get("order_id")
+        if isinstance(llm_order_id, str):
+            # Extract digits from LLM order ID (e.g. 42 from ORD00042)
+            digits_match = re.search(r"\d+", llm_order_id)
+            if digits_match:
+                digits = digits_match.group().lstrip("0")
+                if not digits:
+                    digits = "0"
+                # Check if digits or order ID is in the message
+                if digits in user_msg or llm_order_id.lower() in user_msg.lower():
+                    result_dict["order_id"] = f"ORD{digits_match.group().zfill(5)}"
+                else:
+                    result_dict["order_id"] = None
+            else:
+                result_dict["order_id"] = None
+        else:
+            result_dict["order_id"] = None
 
     # Preserve pinned active order ID if the model did not detect a new one
     if not result_dict.get("order_id") and existing_order_id:

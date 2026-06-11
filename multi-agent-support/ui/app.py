@@ -29,6 +29,11 @@ def _ensure_database():
         if not has_data:
             from data.seed_database import create_database
             create_database()
+            
+        # Ensure additional tables (refunds, replacements, inventory, order_events) exist
+        from tools.refund_processor import _ensure_tables_exist
+        _ensure_tables_exist()
+        
         return {"success": True, "error": None}
     except Exception as e:
         import traceback
@@ -931,20 +936,38 @@ if st.session_state.pending_action:
     elif st.session_state.pending_action == "mitigate_delay":
         cols = st.columns(2)
         with cols[0]:
-            if st.button("Accept ₹500 Coupon 🎁", key="btn_accept_coupon", use_container_width=True, disabled=st.session_state.get("is_streaming", False)):
-                handle_button_click("Accept ₹500 Coupon 🎁")
+            if st.button("Wait for Delivery 🚚", key="btn_wait_delivery", use_container_width=True, disabled=st.session_state.get("is_streaming", False)):
+                handle_button_click("Wait for Delivery 🚚")
         with cols[1]:
-            if st.button("Insist on Cash Refund 💸", key="btn_insist_refund_delay", use_container_width=True, disabled=st.session_state.get("is_streaming", False)):
-                handle_button_click("Insist on Cash Refund 💸")
+            if st.button("Request Refund 💸", key="btn_insist_refund_delay", use_container_width=True, disabled=st.session_state.get("is_streaming", False)):
+                handle_button_click("Request Refund 💸")
 
     elif st.session_state.pending_action == "mitigate_defective":
-        cols = st.columns(2)
-        with cols[0]:
-            if st.button("Accept Free Replacement 📦", key="btn_accept_rep", use_container_width=True, disabled=st.session_state.get("is_streaming", False)):
-                handle_button_click("Accept Free Replacement 📦")
-        with cols[1]:
-            if st.button("Insist on Cash Refund 💸", key="btn_insist_refund_def", use_container_width=True, disabled=st.session_state.get("is_streaming", False)):
-                handle_button_click("Insist on Cash Refund 💸")
+        policy = "eligible"
+        if st.session_state.active_order_id:
+            try:
+                from tools.order_lookup import get_order_by_id
+                order_details = get_order_by_id.invoke({"order_id": st.session_state.active_order_id})
+                policy = order_details.get("return_policy", "eligible")
+            except Exception:
+                pass
+        
+        if policy == "non_returnable":
+            cols = st.columns(2)
+            with cols[0]:
+                if st.button("Accept ₹500 Coupon 🎁", key="btn_accept_coupon_def", use_container_width=True, disabled=st.session_state.get("is_streaming", False)):
+                    handle_button_click("Yes")
+            with cols[1]:
+                if st.button("Decline Coupon ✕", key="btn_decline_coupon_def", use_container_width=True, disabled=st.session_state.get("is_streaming", False)):
+                    handle_button_click("No")
+        else:
+            cols = st.columns(2)
+            with cols[0]:
+                if st.button("Accept Free Replacement 📦", key="btn_accept_rep", use_container_width=True, disabled=st.session_state.get("is_streaming", False)):
+                    handle_button_click("Accept Free Replacement 📦")
+            with cols[1]:
+                if st.button("Insist on Cash Refund 💸", key="btn_insist_refund_def", use_container_width=True, disabled=st.session_state.get("is_streaming", False)):
+                    handle_button_click("Insist on Cash Refund 💸")
 
     elif st.session_state.pending_action in ["refund", "replacement"]:
         cols = st.columns(2)

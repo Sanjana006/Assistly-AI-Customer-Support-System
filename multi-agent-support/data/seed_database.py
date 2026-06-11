@@ -11,8 +11,13 @@ from config import Config
 
 def create_database():
     random.seed(42)
-    db_path = Config.DATABASE_URL.replace("sqlite:///", "")
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    if Config.DATABASE_URL.startswith("sqlite://"):
+        from sqlalchemy.engine import make_url
+        db_path = make_url(Config.DATABASE_URL).database or "support.db"
+    else:
+        db_path = Config.DATABASE_URL.replace("sqlite:///", "") or "support.db"
+    if os.path.dirname(db_path):
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
     
     # Use raw sqlite3 connection directly to bypass SQLAlchemy / pandas version mismatch issues
     conn = sqlite3.connect(db_path)
@@ -68,10 +73,23 @@ def create_database():
         """)
         
         # Seed customers
-        names = ["Priya Sharma", "Rahul Gupta", "Anita Singh",
-                 "Vikram Patel", "Sneha Reddy", "Arjun Nair",
-                 "Kavya Iyer", "Rohan Mehta", "Pooja Joshi",
-                 "Amit Kumar"]
+        first_names = [
+            "Emma", "Liam", "Olivia", "Noah", "Ava", "Oliver", "Sophia", "Lucas", "Mia", "Alexander",
+            "Isabella", "Ethan", "Charlotte", "Mason", "Amelia", "James", "Harper", "Benjamin", "Evelyn", "Daniel",
+            "Elijah", "Logan", "Grace", "Caleb", "Zoe", "Jackson", "Lily", "Jacob", "Chloe", "Michael",
+            "Aarav", "Aditi", "Aditya", "Ananya", "Ankit", "Dev", "Divya", "Gaurav", "Ishaan", "Karan",
+            "Karthik", "Kavita", "Kiran", "Manish", "Meera", "Neha", "Nikhil", "Nisha", "Pranav", "Ravi",
+            "Riya", "Sandeep", "Sanjana", "Shreya", "Siddharth", "Sumit", "Swati", "Varun", "Vikas", "Yash",
+            "Deep", "Raj", "Rani", "Zoya", "Kavya", "Aanya", "Abhishek", "Aishwarya", "Alok", "Anil"
+        ]
+        last_names = [
+            "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez",
+            "Hernandez", "Lopez", "Gonzalez", "Wilson", "Anderson", "Thomas", "Taylor", "Moore", "Jackson", "Martin",
+            "Lee", "Perez", "Thompson", "White", "Harris", "Sanchez", "Clark", "Ramirez", "Lewis", "Robinson",
+            "Sen", "Roy", "Das", "Banerjee", "Chatterjee", "Mukherjee", "Bose", "Choudhury", "Dutta", "Mitra",
+            "Rao", "Naidu", "Pillai", "Menon", "Krishnan", "Deshmukh", "Kulkarni", "Patil", "Bapat", "Gokhale",
+            "Sardesai", "Pawar", "Shinde", "Verma", "Srivastava", "Tripathi", "Pandey", "Mishra", "Tiwari", "Dubey"
+        ]
         tiers = ["silver", "gold", "platinum"]
         products = [
             "Samsung Galaxy S24", "iPhone 15 Pro", "Noise Smartwatch",
@@ -83,13 +101,19 @@ def create_database():
                     "delayed", "cancelled"]
         
         customers = []
+        used_names = set()
         for i in range(100):
             cid = f"CUST{i+1:04d}"
-            name = random.choice(names) + f" {i}"
+            while True:
+                name = f"{random.choice(first_names)} {random.choice(last_names)}"
+                if name not in used_names:
+                    used_names.add(name)
+                    break
+            email_prefix = name.lower().replace(" ", "")
             customers.append({
                 "customer_id": cid,
                 "name": name,
-                "email": f"user{i}@example.com",
+                "email": f"{email_prefix}{i}@example.com",
                 "phone": f"+91 9{random.randint(100000000,999999999)}",
                 "tier": random.choice(tiers),
                 "created_at": (datetime.now() - timedelta(days=random.randint(30,730))).isoformat()

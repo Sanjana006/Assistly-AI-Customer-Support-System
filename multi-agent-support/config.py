@@ -6,15 +6,37 @@ base_dir = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(dotenv_path=os.path.join(base_dir, ".env"))           # multi-agent-support/.env
 load_dotenv(dotenv_path=os.path.join(base_dir, "..", ".env"))     # repo root .env (fallback)
 
+def _is_writable_path(path: str) -> bool:
+    dir_path = os.path.dirname(os.path.abspath(path))
+    try:
+        os.makedirs(dir_path, exist_ok=True)
+        test_file = os.path.join(dir_path, f".write_test_{os.getpid()}")
+        with open(test_file, "w") as f:
+            f.write("test")
+        os.remove(test_file)
+        return True
+    except Exception:
+        return False
+
 # ── Streamlit Cloud: inject secrets into os.environ ──────────────────────────
 # st.secrets is available when running on Streamlit Cloud. Injecting here
 # ensures all os.getenv() calls below (and in third-party libraries like
 # langchain-groq) pick up the right values without needing per-call lookups.
 try:
     import streamlit as st
-    for _key in ["GROQ_API_KEY", "DATABASE_URL", "CHROMA_PATH", "USE_PROD"]:
-        if _key in st.secrets and not os.getenv(_key):
-            os.environ[_key] = str(st.secrets[_key])
+    # Only access st.secrets if on Streamlit Cloud or if a secrets.toml file exists,
+    # as querying st.secrets on recent Streamlit versions crashes with a 'No secrets found' screen.
+    _has_secrets = (
+        os.path.exists("/mount/src")  # Streamlit Cloud
+        or os.path.exists(os.path.expanduser("~/.streamlit/secrets.toml"))
+        or os.path.exists(os.path.join(os.getcwd(), ".streamlit", "secrets.toml"))
+        or os.path.exists(os.path.join(base_dir, ".streamlit", "secrets.toml"))
+        or os.path.exists(os.path.join(base_dir, "..", ".streamlit", "secrets.toml"))
+    )
+    if _has_secrets:
+        for _key in ["GROQ_API_KEY", "DATABASE_URL", "CHROMA_PATH", "USE_PROD"]:
+            if _key in st.secrets and not os.getenv(_key):
+                os.environ[_key] = str(st.secrets[_key])
 except Exception:
     pass  # Running locally or st.secrets not available — .env values are used
 
@@ -32,23 +54,30 @@ class Config:
         return cls.PROD_MODEL if cls.USE_PROD_MODEL else cls.DEV_MODEL
 
     _db_path = os.path.join(base_dir, "data", "support.db")
+    _chroma_default = os.path.join(base_dir, "knowledge_base", "chroma_db")
 
-    # On Streamlit Cloud the source directory is read-only; use /tmp instead.
-    # Locally the standard path is used (and the directory is created below).
-    _is_streamlit_cloud = os.path.exists("/mount/src")
-    if _is_streamlit_cloud:
-        _db_path   = "/tmp/support.db"
+    # Detect Streamlit Cloud or other standard hosting platforms (Render, Heroku, Railway, HF)
+    _is_deployed = (
+        os.path.exists("/mount/src")
+        or os.getenv("PORT") is not None
+        or os.getenv("RENDER") is not None
+        or os.getenv("RAILWAY_STATIC_URL") is not None
+    )
+
+    # If deployed or default db path is not writable, fall back to /tmp
+    if _is_deployed or not _is_writable_path(_db_path):
+        _db_path = "/tmp/support.db"
         _chroma_default = "/tmp/chroma_db"
     else:
         # Ensure database directory exists to avoid SQLite operational errors
         os.makedirs(os.path.dirname(_db_path), exist_ok=True)
-        _chroma_default = os.path.join(base_dir, "knowledge_base", "chroma_db")
 
     DATABASE_URL    = os.getenv("DATABASE_URL", f"sqlite:///{_db_path}")
     CHROMA_PATH     = os.getenv("CHROMA_PATH", _chroma_default)
 
-    # Force using writable directory /tmp for SQLite and Chroma on Streamlit Cloud
-    if _is_streamlit_cloud:
+    # Force using writable directory /tmp for SQLite and Chroma in deployed/read-only environments
+    _db_dir = DATABASE_URL.replace("sqlite:///", "") if DATABASE_URL.startswith("sqlite://") else ""
+    if _is_deployed or not _db_dir or not _is_writable_path(_db_dir):
         if DATABASE_URL.startswith("sqlite://"):
             db_name = os.path.basename(DATABASE_URL) or "support.db"
             DATABASE_URL = f"sqlite:////tmp/{db_name}"

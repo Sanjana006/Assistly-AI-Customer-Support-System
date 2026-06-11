@@ -65,8 +65,7 @@ def _ensure_tables_exist() -> None:
         conn.commit()
 
 
-# Run once when module is imported
-_ensure_tables_exist()
+# Table check/creation is called explicitly during database initialization in app.py
 
 
 def _validate_and_normalize_reason(reason: str) -> str | None:

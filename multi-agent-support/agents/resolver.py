@@ -16,6 +16,24 @@ from sqlalchemy import text
 import uuid
 from datetime import datetime
 
+def safe_invoke(llm, messages, retries: int = 3, backoff: int = 2):
+    attempt = 0
+    while True:
+        try:
+            return llm.invoke(messages)
+        except Exception as e:
+            is_rate_limit = "rate limit" in str(e).lower() or "429" in str(e) or "ratelimit" in e.__class__.__name__.lower()
+            if is_rate_limit and attempt < retries:
+                attempt += 1
+                from loguru import logger
+                logger.warning(f"Groq rate limit hit in resolver, retrying in {backoff}s... Attempt {attempt}/{retries}")
+                import time
+                time.sleep(backoff)
+                backoff *= 2
+                continue
+            else:
+                raise
+
 RESOLVER_TOOLS = [
     get_order_by_id,
     get_orders_by_customer_email,
@@ -88,6 +106,81 @@ def _is_insist_refund(message: str) -> bool:
         return True
     return False
 
+def _is_wait_delivery(message: str) -> bool:
+    cleaned = message.lower().strip().rstrip("!.,")
+    if any(w in cleaned for w in ["wait", "keep", "stay", "delivery", "no refund", "no, cancel request"]):
+        return True
+    return _is_rejection(message)
+
+def _apply_mitigation(state: dict, order_id: str, order_info: dict, reason: str, policy: str) -> dict:
+    state["pending_order_id"] = order_id.upper()
+    state["pending_action_reason"] = reason
+
+    if reason == "Delayed Delivery":
+        state["draft_response"] = (
+            f"I'm so sorry for the delay with your order **{order_id.upper()}**.\n\n"
+            f"I've checked the status and we are working to get it delivered as soon as possible. "
+            f"Would you like to wait for the delivery, or would you prefer me to proceed with a refund request?"
+        )
+        state["pending_action"] = "mitigate_delay"
+        state["awaiting_confirmation"] = True
+        return state
+
+    elif reason == "Damaged/Defective Product":
+        if policy == "non_returnable":
+            state["draft_response"] = (
+                f"I'm so sorry that your **{order_info.get('product_name')}** (Order **{order_id.upper()}**) arrived damaged or defective.\n\n"
+                f"Since this order contains a final-sale/non-returnable product, it is normally not eligible for return or refund. "
+                f"However, as a special exception for this damaged item, I can offer you a **₹500 Store Credit coupon**.\n\n"
+                f"Would you like to accept this coupon? Please reply **Yes** to accept or **No** to decline."
+            )
+            state["pending_action"] = "mitigate_defective"
+            state["awaiting_confirmation"] = True
+            return state
+        else:
+            state["draft_response"] = (
+                f"I'm so sorry that your **{order_info.get('product_name')}** (Order **{order_id.upper()}**) arrived damaged or defective.\n\n"
+                f"I can arrange a **Free Priority Replacement** for you immediately. "
+                f"Otherwise, I can proceed with the refund request. Which would you prefer?"
+            )
+            state["pending_action"] = "mitigate_defective"
+            state["awaiting_confirmation"] = True
+            return state
+
+    else:  # Ordered by Mistake or Found Better Price
+        if policy == "eligible":
+            amount = order_info.get("amount", 0)
+            product = order_info.get("product_name", "your item")
+            state["draft_response"] = (
+                f"I can process a full refund of ₹{float(amount):,.2f} for order **{order_id.upper()}** ({product}).\n\n"
+                f"Would you like me to go ahead? Please reply **Yes** to confirm or **No** to cancel."
+            )
+            state["pending_action"] = "refund"
+            state["awaiting_confirmation"] = True
+            return state
+
+        elif policy == "replacement_only":
+            state["draft_response"] = (
+                f"Under our electronics warranty policy, order **{order_id.upper()}** is only eligible for replacement, not a cash refund.\n\n"
+                f"Would you like me to initiate a priority replacement for you instead? Please reply **Yes** to confirm or **No** to cancel."
+            )
+            state["pending_action"] = "replacement"
+            state["awaiting_confirmation"] = True
+            return state
+
+        elif policy == "non_returnable":
+            state["draft_response"] = (
+                f"I apologize, but order **{order_id.upper()}** contains a final-sale or clearance product and is non-refundable and non-returnable.\n\n"
+                f"Therefore, we cannot process a refund or replacement for this order.\n\n"
+                f"— Amzora Support Team"
+            )
+            state["pending_action"] = None
+            state["pending_order_id"] = None
+            state["pending_action_reason"] = None
+            state["awaiting_confirmation"] = False
+            return state
+    return state
+
 
 def resolve_ticket(state: dict) -> dict:
     classification  = state.get("classification", {})
@@ -116,8 +209,7 @@ def resolve_ticket(state: dict) -> dict:
                 f"To make things right immediately, I can:\n"
                 f"1. **Initiate an instant refund** for this order.\n"
                 f"2. **Escalate** this to our premium logistics team for immediate delivery resolution.\n\n"
-                f"How would you like to proceed? Please let me know!\n\n"
-                f"— QuickShop Support Team"
+                f"How would you like to proceed? Please let me know!"
             )
             state["tools_called"] = [{"tool": "get_order_by_id", "args": {"order_id": order_id}, "output": order_info}]
             state["pending_action"] = None
@@ -143,7 +235,6 @@ def resolve_ticket(state: dict) -> dict:
                 state["awaiting_confirmation"] = True
                 return state
 
-            state["pending_action_reason"] = reason
             order_info = get_order_by_id.invoke({"order_id": pending_order})
             if order_info.get("error"):
                 state["draft_response"] = f"Sorry, I couldn't find order {pending_order}."
@@ -154,108 +245,30 @@ def resolve_ticket(state: dict) -> dict:
                 return state
 
             policy = order_info.get("return_policy", "eligible")
-
-            if reason == "Delayed Delivery":
-                state["draft_response"] = (
-                    f"I'm so sorry for the delay with your order **{pending_order.upper()}**.\n\n"
-                    f"To make this up to you, I can offer you a **₹500 Store Credit coupon** if you'd like to keep the order. "
-                    f"Otherwise, I can proceed with the refund request. Which would you prefer?\n\n"
-                    f"— QuickShop Support Team"
-                )
-                state["pending_action"] = "mitigate_delay"
-                state["awaiting_confirmation"] = True
-                return state
-
-            elif reason == "Damaged/Defective Product":
-                state["draft_response"] = (
-                    f"I'm so sorry that your **{order_info.get('product_name')}** (Order **{pending_order.upper()}**) arrived damaged or defective.\n\n"
-                    f"I can arrange a **Free Priority Replacement** for you immediately. "
-                    f"Otherwise, I can proceed with the refund request. Which would you prefer?\n\n"
-                    f"— QuickShop Support Team"
-                )
-                state["pending_action"] = "mitigate_defective"
-                state["awaiting_confirmation"] = True
-                return state
-
-            else:  # Ordered by Mistake or Found Better Price
-                if policy == "eligible":
-                    amount = order_info.get("amount", 0)
-                    product = order_info.get("product_name", "your item")
-                    state["draft_response"] = (
-                        f"I can process a full refund of ₹{float(amount):,.2f} for order **{pending_order.upper()}** ({product}).\n\n"
-                        f"Would you like me to go ahead? Please reply **Yes** to confirm or **No** to cancel.\n\n"
-                        f"— QuickShop Support Team"
-                    )
-                    state["pending_action"] = "refund"
-                    state["awaiting_confirmation"] = True
-                    return state
-
-                elif policy == "replacement_only":
-                    state["draft_response"] = (
-                        f"Under our electronics warranty policy, order **{pending_order.upper()}** is only eligible for replacement, not a cash refund.\n\n"
-                        f"Would you like me to initiate a priority replacement for you instead? Please reply **Yes** to confirm or **No** to cancel.\n\n"
-                        f"— QuickShop Support Team"
-                    )
-                    state["pending_action"] = "replacement"
-                    state["awaiting_confirmation"] = True
-                    return state
-
-                elif policy == "non_returnable":
-                    state["draft_response"] = (
-                        f"I apologize, but order **{pending_order.upper()}** contains a final-sale or clearance product and is non-refundable and non-returnable.\n\n"
-                        f"Therefore, we cannot process a refund or replacement for this order. Is there anything else I can help you with?\n\n"
-                        f"— QuickShop Support Team"
-                    )
-                    state["pending_action"] = None
-                    state["pending_order_id"] = None
-                    state["pending_action_reason"] = None
-                    state["awaiting_confirmation"] = False
-                    return state
+            return _apply_mitigation(state, pending_order, order_info, reason, policy)
 
         # B. Mitigate Delay State
         elif pending_action == "mitigate_delay":
-            if _is_coupon_acceptance(user_message):
-                try:
-                    with engine.begin() as conn:
-                        conn.execute(text("""
-                            INSERT INTO order_events
-                                (event_id, order_id, event_type, old_status, new_status, note, created_at)
-                            VALUES
-                                (:eid, :oid, 'coupon_applied', NULL, NULL, :note, :now)
-                        """), {
-                            "eid": f"EVT{str(uuid.uuid4())[:8].upper()}",
-                            "oid": pending_order.upper(),
-                            "note": "Customer accepted ₹500 Store Credit coupon for delayed delivery.",
-                            "now": datetime.now().isoformat()
-                        })
-                except Exception as e:
-                    print(f"Error logging coupon: {e}")
-
+            if _is_wait_delivery(user_message):
                 state["draft_response"] = (
-                    f"Thank you! I have successfully credited **₹500 Store Credit** to your QuickShop account. "
-                    f"Your order **{pending_order.upper()}** remains active and will be delivered as soon as possible.\n\n"
+                    f"Thank you for your patience! Your order **{pending_order.upper()}** remains active and we are working to deliver it to you as soon as possible.\n\n"
                     f"Is there anything else I can help you with?\n\n"
-                    f"— QuickShop Support Team"
+                    f"— Amzora Support Team"
                 )
-                state["tools_called"] = [{
-                    "tool": "apply_store_credit_coupon",
-                    "args": {"order_id": pending_order.upper(), "amount": 500},
-                    "output": {"success": True, "amount": 500, "message": "₹500 store credit coupon applied"}
-                }]
                 state["pending_action"] = None
                 state["pending_order_id"] = None
                 state["pending_action_reason"] = None
                 state["awaiting_confirmation"] = False
                 return state
 
-            elif _is_insist_refund(user_message):
+            elif _is_insist_refund(user_message) or "refund" in user_message.lower():
                 order_info = get_order_by_id.invoke({"order_id": pending_order})
                 policy = order_info.get("return_policy", "eligible")
 
                 if policy == "eligible":
                     result = process_refund.invoke({
                         "order_id": pending_order,
-                        "reason": f"{pending_reason} - Customer insisted on refund"
+                        "reason": f"{pending_reason} - Customer requested refund due to delay"
                     })
                     if result.get("success"):
                         state["draft_response"] = (
@@ -264,11 +277,11 @@ def resolve_ticket(state: dict) -> dict:
                             f"• **Amount:** ₹{result['amount']:,.2f}\n"
                             f"• **Order:** {result['order_id']} is now cancelled and stock restored.\n\n"
                             f"The amount will reflect in your account within 3–5 business days.\n\n"
-                            f"— QuickShop Support Team"
+                            f"— Amzora Support Team"
                         )
                         state["tools_called"] = [{
                             "tool": "process_refund",
-                            "args": {"order_id": pending_order, "reason": f"{pending_reason} - Customer insisted on refund"},
+                            "args": {"order_id": pending_order, "reason": f"{pending_reason} - Customer requested refund due to delay"},
                             "output": result
                         }]
                     else:
@@ -282,8 +295,7 @@ def resolve_ticket(state: dict) -> dict:
                 elif policy == "replacement_only":
                     state["draft_response"] = (
                         f"Under our electronics warranty policy, order **{pending_order.upper()}** is only eligible for replacement, not a cash refund.\n\n"
-                        f"Would you like me to initiate a priority replacement for you instead? Please reply **Yes** to confirm or **No** to cancel.\n\n"
-                        f"— QuickShop Support Team"
+                        f"Would you like me to initiate a priority replacement for you instead? Please reply **Yes** to confirm or **No** to cancel."
                     )
                     state["pending_action"] = "replacement"
                     state["awaiting_confirmation"] = True
@@ -293,7 +305,7 @@ def resolve_ticket(state: dict) -> dict:
                     state["draft_response"] = (
                         f"I apologize, but order **{pending_order.upper()}** contains a final-sale or clearance product and is non-refundable and non-returnable.\n\n"
                         f"Therefore, we cannot process a refund or replacement for this order.\n\n"
-                        f"— QuickShop Support Team"
+                        f"— Amzora Support Team"
                     )
                     state["pending_action"] = None
                     state["pending_order_id"] = None
@@ -304,8 +316,8 @@ def resolve_ticket(state: dict) -> dict:
             else:
                 state["draft_response"] = (
                     f"Please choose how you would like to proceed for order **{pending_order.upper()}**:\n"
-                    f"1. **Accept ₹500 Coupon 🎁** (Apply store credit and keep order)\n"
-                    f"2. **Insist on Cash Refund 💸** (Proceed with refund request)\n\n"
+                    f"1. **Wait for Delivery 🚚** (Keep order active)\n"
+                    f"2. **Request Refund 💸** (Proceed with refund request)\n\n"
                     f"Please select or state one of these options."
                 )
                 state["awaiting_confirmation"] = True
@@ -313,70 +325,48 @@ def resolve_ticket(state: dict) -> dict:
 
         # C. Mitigate Defective State
         elif pending_action == "mitigate_defective":
-            if _is_replacement_acceptance(user_message):
-                result = process_replacement.invoke({
-                    "order_id": pending_order,
-                    "reason": "Damaged/Defective Product replacement"
-                })
-                if result.get("success"):
+            order_info = get_order_by_id.invoke({"order_id": pending_order})
+            policy = order_info.get("return_policy", "eligible")
+
+            if policy == "non_returnable":
+                if _is_confirmation(user_message) or _is_coupon_acceptance(user_message) or "accept" in user_message.lower():
+                    try:
+                        with engine.begin() as conn:
+                            conn.execute(text("""
+                                INSERT INTO order_events
+                                    (event_id, order_id, event_type, old_status, new_status, note, created_at)
+                                VALUES
+                                    (:eid, :oid, 'coupon_applied', NULL, NULL, :note, :now)
+                            """), {
+                                "eid": f"EVT{str(uuid.uuid4())[:8].upper()}",
+                                "oid": pending_order.upper(),
+                                "note": "Customer accepted ₹500 Store Credit coupon for damaged non-returnable item.",
+                                "now": datetime.now().isoformat()
+                            })
+                    except Exception as e:
+                        print(f"Error logging coupon: {e}")
+
                     state["draft_response"] = (
-                        f"✅ Done! Priority replacement successfully processed.\n\n"
-                        f"• **Replacement ID:** {result['replacement_id']}\n"
-                        f"• **Order:** {result['order_id']} status updated to 'replacement_pending'.\n"
-                        f"• **Product:** {result['product']}\n\n"
-                        f"A priority shipment of the item has been dispatched.\n\n"
-                        f"— QuickShop Support Team"
+                        f"Thank you! I have successfully credited **₹500 Store Credit** to your Amzora account. "
+                        f"Is there anything else I can help you with?\n\n"
+                        f"— Amzora Support Team"
                     )
                     state["tools_called"] = [{
-                        "tool": "process_replacement",
-                        "args": {"order_id": pending_order, "reason": "Damaged/Defective Product replacement"},
-                        "output": result
+                        "tool": "apply_store_credit_coupon",
+                        "args": {"order_id": pending_order.upper(), "amount": 500},
+                        "output": {"success": True, "amount": 500, "message": "₹500 store credit coupon applied"}
                     }]
-                else:
-                    state["draft_response"] = f"Unable to process replacement: {result.get('error')}"
-                state["pending_action"] = None
-                state["pending_order_id"] = None
-                state["pending_action_reason"] = None
-                state["awaiting_confirmation"] = False
-                return state
-
-            elif _is_insist_refund(user_message):
-                order_info = get_order_by_id.invoke({"order_id": pending_order})
-                policy = order_info.get("return_policy", "eligible")
-
-                if policy == "eligible":
-                    result = process_refund.invoke({
-                        "order_id": pending_order,
-                        "reason": f"{pending_reason} - Customer insisted on refund"
-                    })
-                    if result.get("success"):
-                        state["draft_response"] = (
-                            f"✅ Done! Your refund has been successfully processed.\n\n"
-                            f"• **Refund ID:** {result['refund_id']}\n"
-                            f"• **Amount:** ₹{result['amount']:,.2f}\n"
-                            f"• **Order:** {result['order_id']} is now cancelled and stock restored.\n\n"
-                            f"The amount will reflect in your account within 3–5 business days.\n\n"
-                            f"— QuickShop Support Team"
-                        )
-                        state["tools_called"] = [{
-                            "tool": "process_refund",
-                            "args": {"order_id": pending_order, "reason": f"{pending_reason} - Customer insisted on refund"},
-                            "output": result
-                        }]
-                    else:
-                        state["draft_response"] = f"Unable to process refund: {result.get('error')}"
                     state["pending_action"] = None
                     state["pending_order_id"] = None
                     state["pending_action_reason"] = None
                     state["awaiting_confirmation"] = False
                     return state
 
-                elif policy == "replacement_only":
+                elif _is_rejection(user_message) or _is_insist_refund(user_message):
                     state["draft_response"] = (
-                        f"Under our electronics warranty policy, order **{pending_order.upper()}** is only eligible for replacement, not a cash refund.\n\n"
-                        f"Since you declined the priority replacement, we cannot issue a refund. Your order remains active.\n\n"
+                        f"I understand. Since this was a final-sale, non-returnable item, we are unfortunately unable to process a cash refund or replacement.\n\n"
                         f"Is there anything else I can assist you with?\n\n"
-                        f"— QuickShop Support Team"
+                        f"— Amzora Support Team"
                     )
                     state["pending_action"] = None
                     state["pending_order_id"] = None
@@ -384,27 +374,92 @@ def resolve_ticket(state: dict) -> dict:
                     state["awaiting_confirmation"] = False
                     return state
 
-                elif policy == "non_returnable":
+                else:
                     state["draft_response"] = (
-                        f"I apologize, but order **{pending_order.upper()}** contains a final-sale or clearance product and is non-refundable and non-returnable.\n\n"
-                        f"Therefore, we cannot process a refund or replacement for this order.\n\n"
-                        f"— QuickShop Support Team"
+                        f"Would you like to accept the **₹500 Store Credit coupon** for your damaged item? "
+                        f"Please reply **Yes** to accept or **No** to decline."
                     )
-                    state["pending_action"] = None
-                    state["pending_order_id"] = None
-                    state["pending_action_reason"] = None
-                    state["awaiting_confirmation"] = False
+                    state["awaiting_confirmation"] = True
                     return state
 
             else:
-                state["draft_response"] = (
-                    f"Please choose how you would like to proceed for order **{pending_order.upper()}**:\n"
-                    f"1. **Accept Free Replacement 📦** (Dispatch a priority replacement)\n"
-                    f"2. **Insist on Cash Refund 💸** (Proceed with refund request)\n\n"
-                    f"Please select or state one of these options."
-                )
-                state["awaiting_confirmation"] = True
-                return state
+                if _is_replacement_acceptance(user_message) or "replacement" in user_message.lower():
+                    result = process_replacement.invoke({
+                        "order_id": pending_order,
+                        "reason": "Damaged/Defective Product replacement"
+                    })
+                    if result.get("success"):
+                        state["draft_response"] = (
+                            f"✅ Done! Priority replacement successfully processed.\n\n"
+                            f"• **Replacement ID:** {result['replacement_id']}\n"
+                            f"• **Order:** {result['order_id']} status updated to 'replacement_pending'.\n"
+                            f"• **Product:** {result['product']}\n\n"
+                            f"A priority shipment of the item has been dispatched.\n\n"
+                            f"— Amzora Support Team"
+                        )
+                        state["tools_called"] = [{
+                            "tool": "process_replacement",
+                            "args": {"order_id": pending_order, "reason": "Damaged/Defective Product replacement"},
+                            "output": result
+                        }]
+                    else:
+                        state["draft_response"] = f"Unable to process replacement: {result.get('error')}"
+                    state["pending_action"] = None
+                    state["pending_order_id"] = None
+                    state["pending_action_reason"] = None
+                    state["awaiting_confirmation"] = False
+                    return state
+
+                elif _is_insist_refund(user_message) or "refund" in user_message.lower():
+                    if policy == "eligible":
+                        result = process_refund.invoke({
+                            "order_id": pending_order,
+                            "reason": f"{pending_reason} - Customer insisted on refund"
+                        })
+                        if result.get("success"):
+                            state["draft_response"] = (
+                                f"✅ Done! Your refund has been successfully processed.\n\n"
+                                f"• **Refund ID:** {result['refund_id']}\n"
+                                f"• **Amount:** ₹{result['amount']:,.2f}\n"
+                                f"• **Order:** {result['order_id']} is now cancelled and stock restored.\n\n"
+                                f"The amount will reflect in your account within 3–5 business days.\n\n"
+                                f"— Amzora Support Team"
+                            )
+                            state["tools_called"] = [{
+                                "tool": "process_refund",
+                                "args": {"order_id": pending_order, "reason": f"{pending_reason} - Customer insisted on refund"},
+                                "output": result
+                            }]
+                        else:
+                            state["draft_response"] = f"Unable to process refund: {result.get('error')}"
+                        state["pending_action"] = None
+                        state["pending_order_id"] = None
+                        state["pending_action_reason"] = None
+                        state["awaiting_confirmation"] = False
+                        return state
+
+                    elif policy == "replacement_only":
+                        state["draft_response"] = (
+                            f"Under our electronics warranty policy, order **{pending_order.upper()}** is only eligible for replacement, not a cash refund.\n\n"
+                            f"Since you declined the priority replacement, we cannot issue a refund. Your order remains active.\n\n"
+                            f"Is there anything else I can assist you with?\n\n"
+                            f"— Amzora Support Team"
+                        )
+                        state["pending_action"] = None
+                        state["pending_order_id"] = None
+                        state["pending_action_reason"] = None
+                        state["awaiting_confirmation"] = False
+                        return state
+
+                else:
+                    state["draft_response"] = (
+                        f"Please choose how you would like to proceed for order **{pending_order.upper()}**:\n"
+                        f"1. **Accept Free Replacement 📦** (Dispatch a priority replacement)\n"
+                        f"2. **Insist on Cash Refund 💸** (Proceed with refund request)\n\n"
+                        f"Please select or state one of these options."
+                    )
+                    state["awaiting_confirmation"] = True
+                    return state
 
         # D. Refund Confirmation State
         elif pending_action == "refund":
@@ -422,7 +477,7 @@ def resolve_ticket(state: dict) -> dict:
                         f"**Inventory:** Stock restored for '{result['product']}'.\n\n"
                         f"The amount will reflect in your original payment method "
                         f"within **3–5 business days**.\n\n"
-                        f"— QuickShop Support Team"
+                        f"— Amzora Support Team"
                     )
                     state["tools_called"] = [{
                         "tool": "process_refund",
@@ -442,7 +497,7 @@ def resolve_ticket(state: dict) -> dict:
                     f"No problem at all! The refund for order **{pending_order.upper()}** has **not** been processed. "
                     f"Your order remains active.\n\n"
                     f"Is there anything else I can help you with?\n\n"
-                    f"— QuickShop Support Team"
+                    f"— Amzora Support Team"
                 )
                 state["pending_action"] = None
                 state["pending_order_id"] = None
@@ -453,8 +508,7 @@ def resolve_ticket(state: dict) -> dict:
             else:
                 state["draft_response"] = (
                     f"Do you want me to go ahead and process the refund for order **{pending_order.upper()}**?\n\n"
-                    f"Please reply **Yes** to confirm or **No** to cancel.\n\n"
-                    f"— QuickShop Support Team"
+                    f"Please reply **Yes** to confirm or **No** to cancel."
                 )
                 state["awaiting_confirmation"] = True
                 return state
@@ -473,7 +527,7 @@ def resolve_ticket(state: dict) -> dict:
                         f"• **Order:** {result['order_id']} status updated to 'replacement_pending'.\n"
                         f"• **Product:** {result['product']}\n\n"
                         f"A priority shipment of the item has been dispatched.\n\n"
-                        f"— QuickShop Support Team"
+                        f"— Amzora Support Team"
                     )
                     state["tools_called"] = [{
                         "tool": "process_replacement",
@@ -493,7 +547,7 @@ def resolve_ticket(state: dict) -> dict:
                     f"No problem! The priority replacement for order **{pending_order.upper()}** has **not** been initiated. "
                     f"Your order remains active.\n\n"
                     f"Is there anything else I can help you with?\n\n"
-                    f"— QuickShop Support Team"
+                    f"— Amzora Support Team"
                 )
                 state["pending_action"] = None
                 state["pending_order_id"] = None
@@ -504,17 +558,16 @@ def resolve_ticket(state: dict) -> dict:
             else:
                 state["draft_response"] = (
                     f"Do you want me to go ahead and initiate a priority replacement for order **{pending_order.upper()}**?\n\n"
-                    f"Please reply **Yes** to confirm or **No** to cancel.\n\n"
-                    f"— QuickShop Support Team"
+                    f"Please reply **Yes** to confirm or **No** to cancel."
                 )
                 state["awaiting_confirmation"] = True
                 return state
 
     # ==========================================================
-    # ✅ REFUND/CANCELLATION REQUEST PRE-FLIGHT
+    # ✅ REFUND/CANCELLATION/REPLACEMENT REQUEST PRE-FLIGHT
     # ==========================================================
     if (
-        classification.get("intent") == "refund_request"
+        classification.get("intent") in ["refund_request", "product_complaint", "cancellation_request"]
         and classification.get("order_id")
     ):
         order_id = classification["order_id"]
@@ -535,66 +588,118 @@ def resolve_ticket(state: dict) -> dict:
         is_vip = incident_count >= 2 or state.get("frustration_score", 0.0) >= Config.ESCALATION_FRUSTRATION_THRESHOLD
 
         if is_vip:
-            if policy == "eligible":
-                # VIP Instant Refund
-                result = process_refund.invoke({
-                    "order_id": order_id,
-                    "reason": f"VIP/Frustrated Auto-Bypass Refund (Incidents: {incident_count}, Frustration: {state.get('frustration_score', 0.0):.2f})"
-                })
-                if result.get("success"):
+            user_msg_lower = state["user_message"].lower()
+            is_replacement_req = "replace" in user_msg_lower or "replacement" in user_msg_lower
+
+            if is_replacement_req:
+                if policy == "non_returnable":
+                    state["needs_escalation"] = True
+                    state["escalation_reasons"] = [f"VIP customer requested replacement exception on non-returnable order"]
                     state["draft_response"] = (
-                        f"🚨 **VIP Frictionless Service Applied** 🚨\n\n"
+                        f"🚨 **VIP Exceptional Handoff** 🚨\n\n"
                         f"Dear {profile.get('customer_name', 'Customer')},\n"
-                        f"I see that you have experienced multiple issues in the past (total incidents: {incident_count}). "
-                        f"We sincerely apologize for this repeated inconvenience.\n\n"
-                        f"To make things right immediately, I have **bypassed our standard verification steps** and processed a full refund for you:\n\n"
-                        f"• **Order:** {order_id.upper()}\n"
-                        f"• **Refund ID:** {result['refund_id']}\n"
-                        f"• **Refund Amount:** ₹{result['amount']:,.2f}\n\n"
-                        f"The funds will reflect in your original payment method in **3-5 business days**.\n\n"
-                        f"Is there anything else I can do to restore your trust?\n\n"
-                        f"— QuickShop Support Team"
+                        f"I see that you are requesting a replacement for Order **{order_id.upper()}** ({product}). "
+                        f"Since this item has a 'non-returnable' return policy, our automated assistant is restricted from processing a replacement directly.\n\n"
+                        f"However, because you are a valued VIP customer (total incidents: {incident_count}) and have faced repeated issues, I am immediately routing your ticket to a senior supervisor to approve a special replacement exception."
                     )
                     state["tools_called"] = [
-                        {"tool": "get_customer_incident_profile", "args": {"email": email}, "output": profile},
-                        {"tool": "process_refund", "args": {"order_id": order_id, "reason": f"VIP/Frustrated Auto-Bypass Refund (Incidents: {incident_count})"}, "output": result}
+                        {"tool": "get_customer_incident_profile", "args": {"email": email}, "output": profile}
                     ]
+                    return state
                 else:
-                    state["draft_response"] = f"Unable to process refund: {result.get('error')}"
-                state["pending_action"]        = None
-                state["pending_order_id"]      = None
-                state["pending_action_reason"] = None
-                state["awaiting_confirmation"] = False
-                return state
+                    # VIP Priority Replacement
+                    result = process_replacement.invoke({
+                        "order_id": order_id,
+                        "reason": f"VIP/Frustrated Auto-Bypass Replacement (Incidents: {incident_count}, Frustration: {state.get('frustration_score', 0.0):.2f})"
+                    })
+                    if result.get("success"):
+                        state["draft_response"] = (
+                            f"🚨 **VIP Frictionless Service Applied** 🚨\n\n"
+                            f"Dear {profile.get('customer_name', 'Customer')},\n"
+                            f"I see that you have experienced multiple issues in the past (total incidents: {incident_count}). "
+                            f"We sincerely apologize for this repeated inconvenience.\n\n"
+                            f"To make things right immediately, I have **bypassed our standard verification steps** and processed a priority replacement for you:\n\n"
+                            f"• **Order:** {order_id.upper()}\n"
+                            f"• **Replacement ID:** {result['replacement_id']}\n"
+                            f"• **Product:** {result['product']}\n\n"
+                            f"A priority shipment of the item has been dispatched.\n\n"
+                            f"— Amzora Support Team"
+                        )
+                        state["tools_called"] = [
+                            {"tool": "get_customer_incident_profile", "args": {"email": email}, "output": profile},
+                            {"tool": "process_replacement", "args": {"order_id": order_id, "reason": f"VIP/Frustrated Auto-Bypass Replacement (Incidents: {incident_count})"}, "output": result}
+                        ]
+                    else:
+                        state["draft_response"] = f"Unable to process replacement: {result.get('error')}"
+                    state["pending_action"]        = None
+                    state["pending_order_id"]      = None
+                    state["pending_action_reason"] = None
+                    state["awaiting_confirmation"] = False
+                    return state
+            else:
+                if policy == "eligible":
+                    # VIP Instant Refund
+                    result = process_refund.invoke({
+                        "order_id": order_id,
+                        "reason": f"VIP/Frustrated Auto-Bypass Refund (Incidents: {incident_count}, Frustration: {state.get('frustration_score', 0.0):.2f})"
+                    })
+                    if result.get("success"):
+                        state["draft_response"] = (
+                            f"🚨 **VIP Frictionless Service Applied** 🚨\n\n"
+                            f"Dear {profile.get('customer_name', 'Customer')},\n"
+                            f"I see that you have experienced multiple issues in the past (total incidents: {incident_count}). "
+                            f"We sincerely apologize for this repeated inconvenience.\n\n"
+                            f"To make things right immediately, I have **bypassed our standard verification steps** and processed a full refund for you:\n\n"
+                            f"• **Order:** {order_id.upper()}\n"
+                            f"• **Refund ID:** {result['refund_id']}\n"
+                            f"• **Refund Amount:** ₹{result['amount']:,.2f}\n\n"
+                            f"The funds will reflect in your original payment method in **3-5 business days**.\n\n"
+                            f"— Amzora Support Team"
+                        )
+                        state["tools_called"] = [
+                            {"tool": "get_customer_incident_profile", "args": {"email": email}, "output": profile},
+                            {"tool": "process_refund", "args": {"order_id": order_id, "reason": f"VIP/Frustrated Auto-Bypass Refund (Incidents: {incident_count})"}, "output": result}
+                        ]
+                    else:
+                        state["draft_response"] = f"Unable to process refund: {result.get('error')}"
+                    state["pending_action"]        = None
+                    state["pending_order_id"]      = None
+                    state["pending_action_reason"] = None
+                    state["awaiting_confirmation"] = False
+                    return state
 
-            elif policy in ["replacement_only", "non_returnable"]:
-                # VIP auto-escalation exception requests on restricted products
-                state["needs_escalation"] = True
-                state["escalation_reasons"] = [f"VIP customer requested refund exception on {policy} order"]
-                state["draft_response"] = (
-                    f"🚨 **VIP Exceptional Handoff** 🚨\n\n"
-                    f"Dear {profile.get('customer_name', 'Customer')},\n"
-                    f"I see that you are requesting a refund for Order **{order_id.upper()}** ({product}). "
-                    f"Since this item has a '{policy.replace('_', ' ')}' return policy, our automated assistant is restricted from processing a refund directly.\n\n"
-                    f"However, because you are a valued VIP customer (total incidents: {incident_count}) and have faced repeated issues, I am immediately routing your ticket to a senior supervisor to approve a special refund exception."
-                )
-                state["tools_called"] = [
-                    {"tool": "get_customer_incident_profile", "args": {"email": email}, "output": profile}
-                ]
-                return state
+                elif policy in ["replacement_only", "non_returnable"]:
+                    # VIP auto-escalation exception requests on restricted products
+                    state["needs_escalation"] = True
+                    state["escalation_reasons"] = [f"VIP customer requested refund exception on {policy} order"]
+                    state["draft_response"] = (
+                        f"🚨 **VIP Exceptional Handoff** 🚨\n\n"
+                        f"Dear {profile.get('customer_name', 'Customer')},\n"
+                        f"I see that you are requesting a refund for Order **{order_id.upper()}** ({product}). "
+                        f"Since this item has a '{policy.replace('_', ' ')}' return policy, our automated assistant is restricted from processing a refund directly.\n\n"
+                        f"However, because you are a valued VIP customer (total incidents: {incident_count}) and have faced repeated issues, I am immediately routing your ticket to a senior supervisor to approve a special refund exception."
+                    )
+                    state["tools_called"] = [
+                        {"tool": "get_customer_incident_profile", "args": {"email": email}, "output": profile}
+                    ]
+                    return state
 
         else:
-            # Standard customer -> collect reason first
-            state["draft_response"] = (
-                f"I understand you want to cancel or refund your order **{order_id.upper()}** ({product}).\n\n"
-                f"Before we proceed, could you please select the reason for your cancellation/refund request below?"
-            )
-            state["pending_action"]        = "collect_reason"
-            state["pending_order_id"]      = order_id.upper()
-            state["pending_action_reason"] = None
-            state["awaiting_confirmation"] = True
-            state["tools_called"]          = [{"tool": "get_order_by_id", "args": {"order_id": order_id}, "output": order_info}]
-            return state
+            # Standard customer -> try to map the reason first
+            reason = _map_reason(state["user_message"])
+            state["tools_called"] = [{"tool": "get_order_by_id", "args": {"order_id": order_id}, "output": order_info}]
+            if reason:
+                return _apply_mitigation(state, order_id, order_info, reason, policy)
+            else:
+                state["draft_response"] = (
+                    f"I understand you want to cancel, refund, or replace your order **{order_id.upper()}** ({product}).\n\n"
+                    f"Before we proceed, could you please select the reason for your request below?"
+                )
+                state["pending_action"]        = "collect_reason"
+                state["pending_order_id"]      = order_id.upper()
+                state["pending_action_reason"] = None
+                state["awaiting_confirmation"] = True
+                return state
 
     current_date_str = datetime.now().strftime("%B %d, %Y")
 
@@ -652,7 +757,7 @@ A replacement already exists:
                 preflight_refund_block = f"\n  • refund_status   : No refund or replacement on record for {order_id_in_context.upper()}.\n"
 
     # ── NORMAL FLOW ────────────────────────────────────────────────────────────
-    system_prompt = f"""You are a helpful customer support agent for QuickShop India, an e-commerce platform.
+    system_prompt = f"""You are a helpful customer support agent for Amzora India, an e-commerce platform.
 
 Current Date: {current_date_str}
 
@@ -671,11 +776,12 @@ CRITICAL RULES — follow these exactly:
 6. For refund or cancellation requests, redirect them or prompt, but do not issue refunds without collecting reasons first.
 7. For angry customers — acknowledge their frustration FIRST, then solve.
 8. Keep responses concise and clear.
-9. Sign off as "QuickShop Support Team".
+9. Sign off as "Amzora Support Team" only if the conversation is ending or the issue is fully solved. Do not sign off on every intermediate message.
 10. If the customer has multiple previous incidents, mention them and use a highly apologetic tone.
 11. If an EXISTING REFUND/REPLACEMENT RECORD is provided in the prompt, the action is ALREADY processed. Do NOT call the processing tools again. Just display the existing details.
 12. When you need to call a tool, only output the tool call. Do not mix conversational text and tool calls.
 13. To process a refund or replacement, always invoke the 'process_refund' or 'process_replacement' tool. Never write a response claiming a refund or replacement is processed unless you have called the tool and received the success confirmation in the tool output.
+14. NEVER offer, promise, or mention any store credit, coupons, or compensation (specifically ₹500 store credit) to standard customers for delays, mistakes, or other cases. Coupons are strictly reserved as a rare exception for damaged final-sale (non-returnable) items only.
 """
 
     api_key = SecretStr(Config.GROQ_API_KEY) if Config.GROQ_API_KEY else None
@@ -701,7 +807,7 @@ CRITICAL RULES — follow these exactly:
     response = AIMessage(content="")
     for _ in range(Config.MAX_RETRIES):
         try:
-            res = llm_with_tools.invoke(messages)
+            res = safe_invoke(llm_with_tools, messages)
         except Exception as e:
             from loguru import logger
             logger.error(f"Groq API call failed: {e}")
@@ -782,18 +888,22 @@ CRITICAL RULES — follow these exactly:
                     return state
 
                 # Standard customer -> intercept tool call and collect reason
-                state["draft_response"] = (
-                    f"I would be happy to help you with your order **{order_id.upper()}**.\n\n"
-                    f"Before we proceed, could you please select the reason for your cancellation/refund request below?"
-                )
-                state["pending_action"] = "collect_reason"
-                state["pending_order_id"] = order_id.upper()
-                state["pending_action_reason"] = None
-                state["awaiting_confirmation"] = True
+                reason = _map_reason(state["user_message"])
                 state["tools_called"] = [
                     {"tool": "get_order_by_id", "args": {"order_id": order_id}, "output": order_info}
                 ]
-                return state
+                if reason:
+                    return _apply_mitigation(state, order_id, order_info, reason, policy)
+                else:
+                    state["draft_response"] = (
+                        f"I would be happy to help you with your order **{order_id.upper()}**.\n\n"
+                        f"Before we proceed, could you please select the reason for your cancellation/refund request below?"
+                    )
+                    state["pending_action"] = "collect_reason"
+                    state["pending_order_id"] = order_id.upper()
+                    state["pending_action_reason"] = None
+                    state["awaiting_confirmation"] = True
+                    return state
 
             tool_result = (
                 tool_registry[tool_name].invoke(tool_call["args"])
