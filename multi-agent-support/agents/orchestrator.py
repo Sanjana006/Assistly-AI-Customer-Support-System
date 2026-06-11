@@ -71,8 +71,6 @@ def build_graph():
         state["escalation_reasons"] = ["Customer explicitly requested human"]
         return state
 
-    # Removed stray error handling block (handled later in process_ticket)
-
     graph.add_node("escalate", human_escalation_node)
 
     graph.set_entry_point("classify")
