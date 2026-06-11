@@ -28,7 +28,40 @@ def get_order_by_id(order_id: str) -> dict:
         if not result:
             return {"error": f"Order {order_id} not found"}
         
-        return dict(result._mapping)
+        order_dict = dict(result._mapping)
+        
+        # Look up cancellation reason if status is cancelled
+        if order_dict.get("status") == "cancelled":
+            # Check refunds table
+            refund_row = conn.execute(
+                text("SELECT reason FROM refunds WHERE order_id = :oid"),
+                {"oid": order_id.upper()}
+            ).fetchone()
+            if refund_row and refund_row[0]:
+                order_dict["cancellation_reason"] = refund_row[0]
+            else:
+                # Check order_events table for note
+                event_row = conn.execute(
+                    text("SELECT note FROM order_events WHERE order_id = :oid AND event_type='refund_processed' ORDER BY created_at DESC LIMIT 1"),
+                    {"oid": order_id.upper()}
+                ).fetchone()
+                if event_row and event_row[0]:
+                    order_dict["cancellation_reason"] = event_row[0]
+                else:
+                    order_dict["cancellation_reason"] = "Cancelled by user or due to payment failure"
+        
+        # Look up replacement reason if status is replacement_pending
+        if order_dict.get("status") == "replacement_pending":
+            rep_row = conn.execute(
+                text("SELECT reason FROM replacements WHERE order_id = :oid"),
+                {"oid": order_id.upper()}
+            ).fetchone()
+            if rep_row and rep_row[0]:
+                order_dict["replacement_reason"] = rep_row[0]
+            else:
+                order_dict["replacement_reason"] = "Replacement processed"
+                
+        return order_dict
 
 @tool
 def get_orders_by_customer_email(email: str) -> list:
@@ -138,13 +171,46 @@ def get_order_journey_details(order_id: str) -> dict:
             ]
         }
     elif status == "cancelled":
+        reason = "Cancelled by user or due to payment failure"
+        with engine.connect() as conn:
+            refund_row = conn.execute(
+                text("SELECT reason FROM refunds WHERE order_id = :oid"),
+                {"oid": oid}
+            ).fetchone()
+            if refund_row and refund_row[0]:
+                reason = f"Cancelled by customer. Reason provided: {refund_row[0]}"
+            else:
+                event_row = conn.execute(
+                    text("SELECT note FROM order_events WHERE order_id = :oid AND event_type='refund_processed' ORDER BY created_at DESC LIMIT 1"),
+                    {"oid": oid}
+                ).fetchone()
+                if event_row and event_row[0]:
+                    reason = f"Cancelled by customer. {event_row[0]}"
         return {
             "order_id": oid,
             "warehouse": warehouse,
             "status": "cancelled",
-            "reason": "Cancelled by user or due to payment failure",
+            "reason": reason,
             "milestones": [
-                {"time": "Day 1", "location": "Payment Gateway", "event": "Transaction flagged or cancelled by customer"}
+                {"time": "Day 1", "location": "Payment Gateway", "event": f"Transaction cancelled. Reason: {reason}"}
+            ]
+        }
+    elif status == "replacement_pending":
+        reason = "Replacement request is being processed"
+        with engine.connect() as conn:
+            rep_row = conn.execute(
+                text("SELECT reason FROM replacements WHERE order_id = :oid"),
+                {"oid": oid}
+            ).fetchone()
+            if rep_row and rep_row[0]:
+                reason = f"Replacement processed. Reason: {rep_row[0]}"
+        return {
+            "order_id": oid,
+            "warehouse": warehouse,
+            "status": "replacement_pending",
+            "reason": reason,
+            "milestones": [
+                {"time": "Day 1", "location": warehouse, "event": f"Replacement requested. Reason: {reason}"}
             ]
         }
     elif status == "processing":

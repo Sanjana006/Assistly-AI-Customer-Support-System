@@ -50,27 +50,7 @@ def create_database():
             )
         """)
         
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS refunds (
-                refund_id TEXT PRIMARY KEY,
-                order_id TEXT,
-                amount REAL,
-                reason TEXT,
-                status TEXT,
-                created_at TEXT
-            )
-        """)
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS replacements (
-                replacement_id TEXT PRIMARY KEY,
-                order_id TEXT,
-                status TEXT,
-                reason TEXT,
-                created_at TEXT,
-                FOREIGN KEY (order_id) REFERENCES orders(order_id)
-            )
-        """)
+        # Additional tables (refunds, replacements, order_events, inventory) are dropped/recreated later in the script
         
         # Seed customers
         first_names = [
@@ -154,6 +134,66 @@ def create_database():
             })
         
         pd.DataFrame(orders).to_sql("orders", conn, if_exists="replace", index=False)
+
+        # Drop existing tables if they exist to clear them
+        conn.execute("DROP TABLE IF EXISTS refunds")
+        conn.execute("DROP TABLE IF EXISTS replacements")
+        conn.execute("DROP TABLE IF EXISTS order_events")
+        conn.execute("DROP TABLE IF EXISTS inventory")
+
+        # Recreate them with updated schema
+        conn.execute("""
+            CREATE TABLE refunds (
+                refund_id     TEXT PRIMARY KEY,
+                order_id      TEXT NOT NULL,
+                amount        REAL NOT NULL,
+                reason        TEXT,
+                status        TEXT DEFAULT 'completed',
+                created_at    TEXT NOT NULL,
+                FOREIGN KEY (order_id) REFERENCES orders(order_id)
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE replacements (
+                replacement_id TEXT PRIMARY KEY,
+                order_id      TEXT NOT NULL,
+                status        TEXT DEFAULT 'shipped',
+                reason        TEXT,
+                created_at    TEXT NOT NULL,
+                FOREIGN KEY (order_id) REFERENCES orders(order_id)
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE inventory (
+                product_name  TEXT PRIMARY KEY,
+                stock         INTEGER DEFAULT 0,
+                updated_at    TEXT NOT NULL
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE order_events (
+                event_id      TEXT PRIMARY KEY,
+                order_id      TEXT NOT NULL,
+                event_type    TEXT NOT NULL,
+                old_status    TEXT,
+                new_status    TEXT,
+                note          TEXT,
+                created_at    TEXT NOT NULL,
+                FOREIGN KEY (order_id) REFERENCES orders(order_id)
+            )
+        """)
+
+        # Seed initial stock in inventory for all products
+        now_str = datetime.now().isoformat()
+        for p in products:
+            conn.execute("""
+                INSERT INTO inventory (product_name, stock, updated_at)
+                VALUES (?, 50, ?)
+            """, (p, now_str))
+
         conn.commit()
     finally:
         conn.close()

@@ -724,6 +724,8 @@ You MUST use these exact values. Never guess or substitute any field:
   • customer_tier   : {preflight_data.get('tier')}
   • tracking_number : {preflight_data.get('tracking_number')}
   • return_policy   : {preflight_data.get('return_policy')}
+  • cancellation_reason: {preflight_data.get('cancellation_reason', 'N/A')}
+  • replacement_reason : {preflight_data.get('replacement_reason', 'N/A')}
 """
         else:
             preflight_order_block = f"\nNote: Order {order_id_in_context} was not found in the database. Inform the customer politely.\n"
@@ -782,6 +784,7 @@ CRITICAL RULES — follow these exactly:
 12. When you need to call a tool, only output the tool call. Do not mix conversational text and tool calls.
 13. To process a refund or replacement, always invoke the 'process_refund' or 'process_replacement' tool. Never write a response claiming a refund or replacement is processed unless you have called the tool and received the success confirmation in the tool output.
 14. NEVER offer, promise, or mention any store credit, coupons, or compensation (specifically ₹500 store credit) to standard customers for delays, mistakes, or other cases. Coupons are strictly reserved as a rare exception for damaged final-sale (non-returnable) items only.
+15. If the customer asks why their order was cancelled or replaced, look up the cancellation/refund/replacement reason from the GROUND TRUTH or EXISTING REFUND/REPLACEMENT RECORD above, or call get_order_journey_details to retrieve the reason, and explain it clearly to the customer.
 """
 
     api_key = SecretStr(Config.GROQ_API_KEY) if Config.GROQ_API_KEY else None
