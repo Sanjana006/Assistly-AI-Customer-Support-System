@@ -3,7 +3,7 @@
 [![Live Demo](https://img.shields.io/badge/Live-Demo-brightgreen?style=for-the-badge&logo=streamlit)](https://assistly-app.streamlit.app/)
 [![Python Version](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![Stars](https://img.shields.io/github/stars/sanjananathani/Assistly?style=for-the-badge)](https://github.com/sanjananathani/Assistly/stargazers)
+[![Stars](https://img.shields.io/github/stars/sanjananathani/Assistly?style=for-the-badge)](https://github.com/Sanjana006/Assistly-AI-Customer-Support-System)
 
 **Assistly** is a multi-agent AI customer support system designed for modern e-commerce platforms. Unlike traditional chat deflections that merely regurgitate policy pages, Assistly is built with backend integration. It acts as an autonomous support engineer: lookup up user records, updating order statuses, triggering refunds, dispatching replacements, managing inventory levels, and routing tickets to human operators when things go wrong.
 
