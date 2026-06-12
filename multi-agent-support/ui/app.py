@@ -138,17 +138,20 @@ html, body,
 
 /* Remove Streamlit header/footer chrome but keep sidebar toggle visible */
 #MainMenu, footer, header { visibility: hidden !important; }
-[data-testid="collapsedControl"] {
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapseButton"] {
     visibility: visible !important;
 }
-[data-testid="collapsedControl"] button {
+[data-testid="collapsedControl"] button,
+[data-testid="stSidebarCollapseButton"] {
     color: #A5B4FC !important;
     background-color: rgba(99, 102, 241, 0.1) !important;
     border: 1px solid rgba(99, 102, 241, 0.25) !important;
     border-radius: 0 8px 8px 0 !important;
     transition: all 0.2s ease !important;
 }
-[data-testid="collapsedControl"] button:hover {
+[data-testid="collapsedControl"] button:hover,
+[data-testid="stSidebarCollapseButton"]:hover {
     background-color: rgba(99, 102, 241, 0.2) !important;
     border-color: rgba(99, 102, 241, 0.5) !important;
     color: #C7D2FE !important;
@@ -412,10 +415,15 @@ html, body,
     font-size: 0.9rem !important;
 }
 [data-testid="stChatInput"] textarea::placeholder { color: #475569 !important; }
-[data-testid="stChatInputSubmitButton"] button {
+[data-testid="stChatInputSubmitButton"] {
     background: linear-gradient(135deg, #6366F1, #8B5CF6) !important;
     border: none !important;
     border-radius: 10px !important;
+    color: white !important;
+}
+[data-testid="stChatInputSubmitButton"]:disabled {
+    background: rgba(99, 102, 241, 0.15) !important;
+    color: rgba(255, 255, 255, 0.25) !important;
 }
 
 /* ── BUTTONS ── */
