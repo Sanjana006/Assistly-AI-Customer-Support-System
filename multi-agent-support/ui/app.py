@@ -137,10 +137,18 @@ html, body,
 }
 
 /* Remove Streamlit header/footer chrome but keep sidebar toggle visible */
-#MainMenu, footer, header { visibility: hidden !important; }
+#MainMenu, footer { visibility: hidden !important; }
+header {
+    background: transparent !important;
+    background-color: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    pointer-events: none !important;
+}
 [data-testid="collapsedControl"],
 [data-testid="stSidebarCollapseButton"] {
     visibility: visible !important;
+    pointer-events: auto !important;
 }
 [data-testid="collapsedControl"] button,
 [data-testid="stSidebarCollapseButton"] {
