@@ -146,12 +146,12 @@ header {
     pointer-events: none !important;
 }
 [data-testid="collapsedControl"],
-[data-testid="stSidebarCollapseButton"] {
+[data-testid="stSidebarCollapsedControl"] {
     visibility: visible !important;
     pointer-events: auto !important;
 }
 [data-testid="collapsedControl"] button,
-[data-testid="stSidebarCollapseButton"] {
+[data-testid="stSidebarCollapsedControl"] button {
     color: #A5B4FC !important;
     background-color: rgba(99, 102, 241, 0.1) !important;
     border: 1px solid rgba(99, 102, 241, 0.25) !important;
@@ -159,7 +159,7 @@ header {
     transition: all 0.2s ease !important;
 }
 [data-testid="collapsedControl"] button:hover,
-[data-testid="stSidebarCollapseButton"]:hover {
+[data-testid="stSidebarCollapsedControl"] button:hover {
     background-color: rgba(99, 102, 241, 0.2) !important;
     border-color: rgba(99, 102, 241, 0.5) !important;
     color: #C7D2FE !important;
