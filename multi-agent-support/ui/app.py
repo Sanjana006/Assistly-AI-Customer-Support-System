@@ -2,7 +2,7 @@ import streamlit as st
 import sys, os
 
 st.set_page_config(
-    page_title="Assistly — AI Support",
+    page_title="Assistly",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -136,8 +136,23 @@ html, body,
     color: #E2E8F0 !important;
 }
 
-/* Remove Streamlit header/footer chrome */
+/* Remove Streamlit header/footer chrome but keep sidebar toggle visible */
 #MainMenu, footer, header { visibility: hidden !important; }
+[data-testid="collapsedControl"] {
+    visibility: visible !important;
+}
+[data-testid="collapsedControl"] button {
+    color: #A5B4FC !important;
+    background-color: rgba(99, 102, 241, 0.1) !important;
+    border: 1px solid rgba(99, 102, 241, 0.25) !important;
+    border-radius: 0 8px 8px 0 !important;
+    transition: all 0.2s ease !important;
+}
+[data-testid="collapsedControl"] button:hover {
+    background-color: rgba(99, 102, 241, 0.2) !important;
+    border-color: rgba(99, 102, 241, 0.5) !important;
+    color: #C7D2FE !important;
+}
 [data-testid="stDeployButton"] { display: none !important; }
 [data-testid="stToolbar"] { display: none !important; }
 
