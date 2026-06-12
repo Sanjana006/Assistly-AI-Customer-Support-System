@@ -246,10 +246,18 @@ The application is deployed live on Streamlit Community Cloud. You can try out s
 
 ---
 
-## ✍️ Built by
+## ✍️ Creator & Vision
 
-I built Assistly because I wanted to go beyond basic support chatbots. For a long time, conversational AI has been isolated from backend platforms, resulting in bots that can talk but can't solve actual customer issues. By combining LangGraph state machines, structured ReAct tool-calling loops, and a custom fine-tuned classifier running on consumer hardware, Assistly demonstrates how AI agents can execute real, transaction-safe database operations while strictly adhering to business rules.
+**Sanjana Nathani**  
+*AI Engineer & Systems Developer*
 
-Feel free to open an issue or submit a pull request if you want to collaborate! 
+> "Conversational AI shouldn't just deflect; it should resolve."
 
-— **Sanjana Nathani** (Project Creator)
+Assistly was born out of a desire to push conversational AI beyond simple rule-based deflections. For too long, customer support chatbots have been isolated from transactional backend systems—relegated to quoting static policy pages rather than resolving real issues. 
+
+By designing Assistly, I wanted to demonstrate how multi-agent orchestrations (using **LangGraph**), structured tool-calling loops (**ReAct**), and fine-tuned local LLMs (**Qwen-1.5B via QLoRA**) can converge to create a safe, transaction-aware, and context-sensitive customer support engine that delivers genuine business value.
+
+### 🤝 Connect & Collaborate
+* 🖥️ **GitHub**: [@Sanjana006](https://github.com/Sanjana006)
+* 💼 **LinkedIn**: [Sanjana Nathani](https://www.linkedin.com/in/sanjana-nathani-26a42727b/)
+* 📧 **Get in Touch**: Feel free to open an issue or submit a pull request if you want to collaborate!
