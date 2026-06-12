@@ -145,24 +145,11 @@ header {
     box-shadow: none !important;
     pointer-events: none !important;
 }
+/* Hide sidebar expand/collapse buttons to lock the sidebar open */
 [data-testid="collapsedControl"],
-[data-testid="stSidebarCollapsedControl"] {
-    visibility: visible !important;
-    pointer-events: auto !important;
-}
-[data-testid="collapsedControl"] button,
-[data-testid="stSidebarCollapsedControl"] button {
-    color: #A5B4FC !important;
-    background-color: rgba(99, 102, 241, 0.1) !important;
-    border: 1px solid rgba(99, 102, 241, 0.25) !important;
-    border-radius: 0 8px 8px 0 !important;
-    transition: all 0.2s ease !important;
-}
-[data-testid="collapsedControl"] button:hover,
-[data-testid="stSidebarCollapsedControl"] button:hover {
-    background-color: rgba(99, 102, 241, 0.2) !important;
-    border-color: rgba(99, 102, 241, 0.5) !important;
-    color: #C7D2FE !important;
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="stSidebarCollapseButton"] {
+    display: none !important;
 }
 [data-testid="stDeployButton"] { display: none !important; }
 [data-testid="stToolbar"] { display: none !important; }
