@@ -1,4 +1,4 @@
-# ⚡ Assistly — AI Customer Support System
+# Assistly : Multi-Agent AI Customer Support System
 
 [![Live Demo](https://img.shields.io/badge/Live-Demo-brightgreen?style=for-the-badge&logo=streamlit)](https://assistly-app.streamlit.app/)
 [![Python Version](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python)](https://www.python.org/)
