@@ -9,6 +9,28 @@
 
 ---
 
+## 📌 Table of Contents
+
+- [😤 Why Assistly?](#-why-assistly)
+- [🗺️ Architecture Flow](#️-architecture-flow)
+- [🤖 The Multi-Agent Squad](#-the-multi-agent-squad)
+  - [1. 🔍 Classifier Agent](#1--classifier-agent)
+  - [2. 🛠️ Resolver Agent (ReAct Tool-Calling)](#2--resolver-agent-react-tool-calling)
+  - [3. ✅ QA Agent (Auditor)](#3--qa-agent-auditor)
+  - [4. 🚨 Escalation Agent (Rules Engine)](#4--escalation-agent-rules-engine)
+- [🧠 Fine-tuned Local Classifier](#-fine-tuned-local-classifier)
+- [🛠️ Tech Stack](#️-tech-stack)
+- [🚀 How It Works: A Step-by-Step Example](#-how-it-works-a-step-by-step-example)
+- [⚙️ Getting Started](#️-getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+- [🗂️ Project Structure](#️-project-structure)
+- [🌍 Live Demo](#-live-demo)
+- [✍️ Creator & Vision](#️-creator--vision)
+
+---
+
+
 ## 😤 Why Assistly?
 
 Most customer support chatbots are incredibly frustrating. You’ve probably interacted with them: you ask for a refund, the bot correctly identifies that you are unhappy, and then it simply prints a link to a return policy page or tells you to call a support hotline. According to HubSpot, **75% of customers expect help within 5 minutes**, yet traditional chatbots average a poor **~30% resolution rate** because they cannot execute real backend actions. 
