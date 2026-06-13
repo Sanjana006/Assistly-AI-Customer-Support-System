@@ -234,27 +234,39 @@ Let's walk through what happens when a standard customer sends:
 ```
 Assistly-AI-Customer-Support-System/
 ├── multi-agent-support/
-│   ├── agents/
-│   │   ├── classifier.py       # Intent + sentiment detection
-│   │   ├── resolver.py         # Tool-calling ReAct agent
-│   │   ├── qa_agent.py         # Response quality scorer
-│   │   ├── escalation.py       # Rules-based escalation engine
-│   │   └── orchestrator.py     # LangGraph state machine
+│   ├── graph/
+│   │   ├── __init__.py
+│   │   ├── state.py            
+│   │   └── graph.py            
+│   ├── nodes/
+│   │   ├── __init__.py
+│   │   ├── classifier.py       
+│   │   ├── resolver.py         
+│   │   ├── qa.py               
+│   │   └── escalation.py       
 │   ├── tools/
-│   │   ├── order_lookup.py     # Order + customer DB tools
-│   │   ├── refund_processor.py # Refund + replacement + audit tools
-│   │   └── kb_search.py        # ChromaDB vector search
+│   │   ├── order_lookup.py     
+│   │   ├── refund_processor.py 
+│   │   └── kb_search.py       
+│   ├── models/
+│   │   ├── __init__.py
+│   │   ├── groq_client.py      
+│   │   └── local_classifier.py 
 │   ├── data/
-│   │   ├── seed_database.py    # Seeds 100 customers, 500 orders, and inventory
-│   │   └── load_dataset.py     # Downloads Bitext dataset
+│   │   ├── seed_database.py   
+│   │   └── load_dataset.py    
 │   ├── scripts/
-│   │   └── finetune.py         # QLoRA fine-tuning pipeline
-│   ├── tests/                  # Unit tests for all agents
-│   ├── fine_tuned_classifier/  # Saved LoRA adapter weights
-│   └── app.py                  # Streamlit UI
-├── config.py
-├── .env.example
-└── requirements.txt
+│   │   ├── finetune.py        
+│   │   └── test_classifier.py  
+│   ├── config.py              
+│   ├── fine_tuned_classifier/ 
+│   └── ui/                     
+│       ├── app.py              
+│       └── pages/
+│           └── admin.py        
+├── pyrefly.toml                
+├── .env                        
+└── requirements.txt            
 ```
 
 ---
