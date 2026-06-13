@@ -9,7 +9,7 @@ st.set_page_config(
 )
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from agents.orchestrator import process_ticket
+from graph.graph import process_ticket
 from config import Config
 
 # ── Auto-seed database on first run (Streamlit Cloud has no committed .db) ────

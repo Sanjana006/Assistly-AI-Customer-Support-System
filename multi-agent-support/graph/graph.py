@@ -1,52 +1,14 @@
 from langgraph.graph import StateGraph, END
-from typing import TypedDict, Optional, cast
+from typing import Optional, cast
 from loguru import logger
 import time
 
 from config import Config
-
-from agents.classifier import classify_message
-from agents.resolver import resolve_ticket
-from agents.qa_agent import qa_check
-from agents.escalation import check_escalation
-
-class SupportState(TypedDict):
-    # Input
-    user_message: str
-    conversation_history: list[dict]
-
-    # After classifier
-    classification: dict
-    intent: str
-    sentiment: str
-    frustration_score: float
-    urgency: str
-
-    # Confirmation flow
-    # When resolver wants to do a destructive action (refund, cancel),
-    # it sets this instead of doing it immediately
-    pending_action: Optional[str]      # e.g. "refund" | "cancel" | None
-    pending_order_id: Optional[str]    # the order the action applies to
-    pending_action_reason: Optional[str] # reason for refund/replacement
-    awaiting_confirmation: bool        # True = bot is waiting for yes/no
-
-    # After resolver
-    draft_response: str
-    tools_called: list[dict]
-
-    # After QA
-    final_response: str
-    quality_score: float
-    qa_result: dict
-
-    # After escalation
-    needs_escalation: bool
-    escalation_reasons: list[str]
-
-    # Metadata
-    processing_time_ms: float
-    ticket_id: str
-
+from graph.state import SupportState
+from nodes.classifier import classify_message
+from nodes.resolver import resolve_ticket
+from nodes.qa import qa_check
+from nodes.escalation import check_escalation
 
 def should_escalate(state: SupportState) -> str:
     if state.get("intent") == "human_request":
@@ -137,7 +99,7 @@ def process_ticket(
     while True:
         try:
             final_state = support_graph.invoke(initial_state)
-            final_state = cast(SupportState, final_state)  # Ensure static type matches
+            final_state = cast(SupportState, final_state)
             break
         except Exception as e:
             # Import RateLimitError for specific handling
@@ -158,7 +120,7 @@ def process_ticket(
                     )
                     state["needs_escalation"] = True
                     state["escalation_reasons"] = [f"LLM RateLimitError after {attempts} retries: {str(e)}"]
-                    return cast(SupportState, state)
+                    return state
                 backoff = 5 * (2 ** (attempts - 1))
                 logger.warning(f"Groq rate limit hit, retrying after {backoff}s (attempt {attempts}/{Config.MAX_RETRIES})")
                 time.sleep(backoff)
@@ -173,7 +135,7 @@ def process_ticket(
                 )
                 state["needs_escalation"] = True
                 state["escalation_reasons"] = [f"LLM Tool Call Error: {str(e)}"]
-                return cast(SupportState, state)
+                return state
 
     final_state["processing_time_ms"] = (time.time() - start_time) * 1000
     logger.info(

@@ -1,4 +1,4 @@
-from langchain_groq import ChatGroq          # ← was: from langchain_anthropic import ChatAnthropic
+from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, SecretStr
 from typing import Optional, Literal
@@ -48,51 +48,8 @@ def classify_message(state: dict) -> dict:
         if os.path.exists(adapter_path) and len(os.listdir(adapter_path)) > 0:
             try:
                 import json, re, torch
-                from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
-                from peft import PeftModel
-
-                # ── Cache model across requests (load once, reuse) ──────────
-                # We stash the loaded model on this module so Streamlit reruns
-                # don't reload 1.5B weights on every message.
-                _cache = sys.modules[__name__].__dict__
-                if "_local_model" not in _cache or _cache.get("_local_model_path") != adapter_path:
-                    logger.info(f"Local Classifier: Loading Qwen2.5-1.5B base + LoRA adapter from {adapter_path}...")
-
-                    BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
-
-                    tokenizer = AutoTokenizer.from_pretrained(adapter_path)  # type: ignore[misc]
-                    tokenizer.pad_token = tokenizer.eos_token  # type: ignore[assignment]
-                    
-                    # Load chat template from jinja file if present and not loaded automatically
-                    chat_template_path = os.path.join(adapter_path, "chat_template.jinja")
-                    if os.path.exists(chat_template_path) and not getattr(tokenizer, "chat_template", None):
-                        with open(chat_template_path, "r", encoding="utf-8") as f:
-                            tokenizer.chat_template = f.read()
-
-                    bnb_config = BitsAndBytesConfig(
-                        load_in_4bit=True,
-                        bnb_4bit_quant_type="nf4",
-                        bnb_4bit_use_double_quant=True,
-                        bnb_4bit_compute_dtype=torch.float16,
-                    )
-                    base_model = AutoModelForCausalLM.from_pretrained(  # type: ignore[misc]
-                        BASE_MODEL,
-                        quantization_config=bnb_config,
-                        device_map="auto",
-                        torch_dtype=torch.float16,
-                    )
-                    if base_model is None:
-                        raise RuntimeError(f"AutoModelForCausalLM.from_pretrained returned None for {BASE_MODEL}")
-                    model = PeftModel.from_pretrained(base_model, adapter_path)
-                    model.eval()
-
-                    _cache["_local_model"]      = model
-                    _cache["_local_tokenizer"]  = tokenizer
-                    _cache["_local_model_path"] = adapter_path
-                    logger.info("Local Classifier: Model loaded and cached.")
-
-                model     = _cache["_local_model"]
-                tokenizer = _cache["_local_tokenizer"]
+                from models.local_classifier import get_local_classifier
+                model, tokenizer = get_local_classifier(adapter_path)
 
                 # ── Build the same prompt used during training ───────────────
                 system_prompt = (
@@ -145,18 +102,10 @@ def classify_message(state: dict) -> dict:
             )
 
     # Cloud API Classifier — uses JSON mode to avoid Groq tool_use_failed bug
-    # llama-3.1-8b-instant wraps structured output in <function=...> tags when
-    # using with_structured_output, so we inject the schema into the prompt and
-    # parse the raw JSON response manually instead.
     if not result_dict:
         import json
-        api_key = SecretStr(Config.GROQ_API_KEY) if Config.GROQ_API_KEY else None
-        llm = ChatGroq(
-            model=Config.get_model(),
-            api_key=api_key,
-            max_tokens=500,
-            model_kwargs={"response_format": {"type": "json_object"}}
-        )
+        from models.groq_client import get_groq_client
+        llm = get_groq_client()
 
         schema_str = """{
   "intent": one of ["order_status","refund_request","shipping_inquiry","product_complaint","account_issue","payment_issue","cancellation_request","general_inquiry","human_request"],

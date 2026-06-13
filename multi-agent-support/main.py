@@ -1,4 +1,4 @@
-from agents.orchestrator import process_ticket
+from graph.graph import process_ticket
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
